@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Define common variables for colors and fonts */
+:root {
+  --font-sans: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --primary-link-color: #646cff;
+  --primary-link-hover: #535bf2;
+  --dark-bg: #242424;
+  --light-bg: #ffffff;
+
+  --light-text: #213547;
+
+  /* Additional optimizations */
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+/* Base Reset & Global Styles */
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  background: var(--gradient-bg);
+  color: var(--text-color);
+}
+
+/* Link Styles */
+a {
+  font-weight: 500;
+  color: var(--accent-color);
+  text-decoration: underline;
+}
+a:hover {
+  color: var(--secondary-color);
+}
+
+/* Headings */
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+  color: var(--header-text);
+}
+
+/* Button Styling – integrating Tailwind’s @apply for consistency */
+button {
+  @apply rounded px-4 py-2 text-base font-medium transition-colors;
+  font-family: inherit;
+  cursor: pointer;
+  background-color: var(--primary-color);
+  color: var(--header-text);
+  border: none;
+}
+button:hover {
+  background-color: var(--secondary-color);
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+/* Google Map Container – now fitting its parent with a border for emphasis */
+.google-map {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  border: 2px solid var(--accent-color);
+  border-radius: 8px;
+}
+
+/* Header Styling for a brighter navigation area */
+header {
+  background: var(--header-bg);
+  padding: 1rem;
+  color: var(--header-text);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Card Component Styles – use Tailwind utilities with custom tweaks */
+.card {
+  @apply bg-white shadow-lg rounded-lg p-4;
+}
+.card-header {
+  @apply border-b pb-2 mb-4 text-xl font-bold text-neutral-800;
+}
+.card-content {
+  @apply text-neutral-700;
+}
+
+/* Light Mode Overrides */
+@media (prefers-color-scheme: light) {
+  body {
+    background: var(--neutral-light);
+    color: var(--neutral-dark);
+  }
+  a:hover {
+    color: var(--primary-color);
+  }
+  button {
+    background-color: var(--accent-color);
+    color: var(--neutral-light);
+  }
+}
+
+/* Dark Mode Overrides */
+@media (prefers-color-scheme: dark) {
+  body {
+    background: var(--gradient-bg);
+    color: var(--text-color);
+  }
+}
