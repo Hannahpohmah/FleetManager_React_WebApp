@@ -4,16 +4,17 @@ import path from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: '/FleetManager_WebApp/', // 👈 Add this line
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),  // This creates the alias for 'src'
+      '@': path.resolve(__dirname, 'src'),
     },
   },
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:5000', // Your backend server URL
+        target: 'http://localhost:5000',
         changeOrigin: true,
         secure: false
       }
