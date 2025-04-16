@@ -2,17 +2,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Loader } from 'lucide-react';
 
-const RouteMap = ({ routes = []}) => {
+const RouteMap = ({ routes = [], driverLocations = [] }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [mapData, setMapData] = useState([]);
   const [progress, setProgress] = useState(0);
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
+  const driverMarkersRef = useRef([]); // Store driver markers for easy updates
   const abortControllersRef = useRef([]); // Store AbortControllers for cleanup
+  
   useEffect(() => {
     console.log("RouteMap component received routes:", routes);
-  }, [routes]);
+    console.log("RouteMap component received driver locations:", driverLocations);
+  }, [routes, driverLocations]);
+  
   // Initialize the map
   useEffect(() => {
     if (!mapRef.current) return;
@@ -45,6 +49,102 @@ const RouteMap = ({ routes = []}) => {
     };
   }, []);
 
+
+  // In the useEffect hook for driver markers
+  // Modified useEffect hook for driver markers
+useEffect(() => {
+  if (!mapInstanceRef.current || !driverLocations || driverLocations.length === 0) return;
+  
+  console.log("Processing driver locations:", driverLocations);
+  
+  // Clear previous driver markers
+  driverMarkersRef.current.forEach(marker => {
+    mapInstanceRef.current.removeLayer(marker);
+  });
+  driverMarkersRef.current = [];
+  
+  // Collect all driver points to use for bounds calculation
+  const driverPoints = [];
+  
+  // Add new driver markers
+  driverLocations.forEach((driver, index) => {
+    // Check for latitude/longitude directly on driver object
+    if (!driver.latitude || !driver.longitude) {
+      console.log(`Driver ${index} missing coordinates:`, driver);
+      return;
+    }
+    
+    // Collect driver location for bounds calculation
+    const driverLocation = [driver.latitude, driver.longitude];
+    driverPoints.push(driverLocation);
+    
+    console.log(`Adding driver marker for ${driver.driverName || 'Unknown'} at:`, driverLocation);
+    
+    // Create driver marker with custom icon that looks like a car
+    const driverMarker = window.L.marker(driverLocation, {
+      icon: window.L.divIcon({
+        className: 'driver-marker',
+        html: `
+          <div style="position: relative; width: 40px; height: 40px;">
+            <div style="position: absolute; top: 0; left: 0; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+              <div style="background-color: #3b82f6; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; transform: rotate(${driver.heading || 0}deg);">
+                <!-- Car icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"></path>
+                  <circle cx="6.5" cy="16.5" r="2.5"></circle>
+                  <circle cx="16.5" cy="16.5" r="2.5"></circle>
+                </svg>
+              </div>
+            </div>
+            ${driver.driverName ? `<div style="position: absolute; top: 30px; left: -30px; background-color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">${driver.driverName}</div>` : ''}
+          </div>
+        `,
+        iconSize: [40, 40],
+        iconAnchor: [20, 20]
+      })
+    }).addTo(mapInstanceRef.current);
+    
+    // Add popup with driver information
+    const popupContent = `
+      <div>
+        <strong>${driver.driverName || `Driver ${index + 1}`}</strong>
+        ${driver.status ? `<div>Status: ${driver.status}</div>` : ''}
+        ${driver.vehicle ? `<div>Vehicle: ${driver.vehicle}</div>` : ''}
+        ${driver.timestamp ? `<div>Last updated: ${new Date(driver.timestamp).toLocaleTimeString()}</div>` : ''}
+      </div>
+    `;
+    
+    driverMarker.bindPopup(popupContent);
+    driverMarkersRef.current.push(driverMarker);
+  });
+  
+  // Handle map bounds to show all drivers and routes
+  if (driverPoints.length > 0) {
+    // First, check if we have route data
+    const hasRouteData = mapData && mapData.length > 0;
+    
+    // If no route data or we're initializing the map, fit to driver points
+    if (!hasRouteData) {
+      try {
+        // Create a bounds object and expand it to include all driver points
+        const bounds = window.L.latLngBounds(driverPoints);
+        
+        // Check if Accra is already in view (common routes area)
+        const accraPoint = [5.6037, -0.1870];
+        bounds.extend(accraPoint);
+        
+        // Add some padding to ensure markers are fully visible
+        mapInstanceRef.current.fitBounds(bounds.pad(0.2));
+        
+        
+      } catch (error) {
+        console.error("Error setting map bounds:", error);
+        // Fallback to Accra as center
+        mapInstanceRef.current.setView([5.6037, -0.1870], 13);
+      }
+    }
+  }
+}, [driverLocations, mapData]);
   // Geocode and display routes when routes change
   useEffect(() => {
     if (!routes || routes.length === 0 || !mapInstanceRef.current) return;
@@ -978,61 +1078,88 @@ if (route.destinations && route.destinations.length > 0) {
         )}
       </div>
       
-      {!loading && mapData.length > 0 && (
+      {!loading && (
         <div className="mt-4">
-          <h5 className="font-medium mb-2">Routes Legend</h5>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {mapData.map((route, index) => {
-              // For the end, use the last item in streets array if available
-              const endStreet = route.streets && route.streets.length > 0 
-                ? route.streets[route.streets.length - 1] 
-                : (route.destinations && route.destinations.length > 0 
-                  ? route.destinations[route.destinations.length - 1] 
-                  : route.end);
-              
-              // Calculate the number of streets to show in the shortened path (at most 3)
-              const maxStreets = 3;
-              let pathDisplay = '';
-              
-              if (route.streets && route.streets.length > 0) {
-                if (route.streets.length <= maxStreets + 2) {
-                  // If we have few streets, show all of them except start/end
-                  const middleStreets = route.streets.slice(1, -1);
-                  pathDisplay = middleStreets.length > 0 ? `via ${middleStreets.join(' → ')}` : '';
-                } else {
-                  // If we have many streets, show the first one, ellipsis, and the last one before the end
-                  pathDisplay = `via ${route.streets[1]} → ... → ${route.streets[route.streets.length - 2]}`;
-                }
-              }
-              
-              return (
-                <div key={index} className="flex items-center">
-                  <div
-                    className="w-4 h-4 rounded-full mr-2 flex-shrink-0"
-                    style={{ backgroundColor: getRouteColor(index) }}
-                  ></div>
-                  <div className="text-sm overflow-hidden">
-                    <span className="font-medium">{route.start} to {endStreet}</span>
-                    {pathDisplay && (
-                      <span className="text-xs text-gray-500 ml-1 block md:inline">
-                        {pathDisplay}
-                      </span>
-                    )}
-                    {route.isMultiStop && route.destinations && route.destinations.length > 1 && (
-                      <span className="text-xs text-blue-500 ml-1 block">
-                        Multi-stop route ({route.destinations.length} stops)
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          {/* Route Legend */}
+          {mapData.length > 0 && (
+            <>
+              <h5 className="font-medium mb-2">Routes Legend</h5>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {mapData.map((route, index) => {
+                  // For the end, use the last item in streets array if available
+                  const endStreet = route.streets && route.streets.length > 0 
+                    ? route.streets[route.streets.length - 1] 
+                    : (route.destinations && route.destinations.length > 0 
+                      ? route.destinations[route.destinations.length - 1] 
+                      : route.end);
+                  
+                  // Calculate the number of streets to show in the shortened path (at most 3)
+                  const maxStreets = 3;
+                  let pathDisplay = '';
+                  
+                  if (route.streets && route.streets.length > 0) {
+                    if (route.streets.length <= maxStreets + 2) {
+                      // If we have few streets, show all of them except start/end
+                      const middleStreets = route.streets.slice(1, -1);
+                      pathDisplay = middleStreets.length > 0 ? `via ${middleStreets.join(' → ')}` : '';
+                    } else {
+                      // If we have many streets, show the first one, ellipsis, and the last one before the end
+                      pathDisplay = `via ${route.streets[1]} → ... → ${route.streets[route.streets.length - 2]}`;
+                    }
+                  }
+                  
+                  return (
+                    <div key={index} className="flex items-center">
+                      <div
+                        className="w-4 h-4 rounded-full mr-2 flex-shrink-0"
+                        style={{ backgroundColor: getRouteColor(index) }}
+                      ></div>
+                      <div className="text-sm overflow-hidden">
+                        <span className="font-medium">{route.start} to {endStreet}</span>
+                        {pathDisplay && (
+                          <span className="text-xs text-gray-500 ml-1 block md:inline">
+                            {pathDisplay}
+                          </span>
+                        )}
+                        {route.isMultiStop && route.destinations && route.destinations.length > 1 && (
+                          <span className="text-xs text-blue-500 ml-1 block">
+                            Multi-stop route ({route.destinations.length} stops)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          
+          {/* Driver Legend */}
+          {driverLocations && driverLocations.length > 0 && (
+  <>
+    <h5 className="font-medium mt-4 mb-2">Drivers</h5>
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {driverLocations.map((driver, index) => (
+        <div key={index} className="flex items-center p-2 border rounded bg-gray-50">
+          <div className="flex-shrink-0 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"></path>
+              <circle cx="6.5" cy="16.5" r="2.5"></circle>
+              <circle cx="16.5" cy="16.5" r="2.5"></circle>
+            </svg>
+          </div>
+          <div className="text-sm overflow-hidden">
+            <div className="font-medium">{driver.driverName || `Driver ${index + 1}`}</div>
+            {driver.status && <div className="text-xs text-gray-600">Status: {driver.status}</div>}
+            {driver.timestamp && <div className="text-xs text-gray-600">Last seen: {new Date(driver.timestamp).toLocaleTimeString()}</div>}
           </div>
         </div>
+      ))}
+    </div>
+  </>
+          )}
+        </div>
       )}
-      
-     
-    
     </div>
   );
 };
