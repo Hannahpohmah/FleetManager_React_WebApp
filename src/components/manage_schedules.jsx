@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Truck, Users, MapPin, AlertTriangle, FileText, Package, Store } from 'lucide-react';
+import { Calendar, Truck, Users, MapPin, AlertTriangle, FileText, Package, Store, Navigation } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 const ScheduleManager = () => {
@@ -21,7 +21,6 @@ const ScheduleManager = () => {
     fetchData();
   }, [selectedDate]);
 
-  // Add this effect to debug driver data
   useEffect(() => {
     console.log('Driver data:', drivers);
   }, [drivers]);
@@ -42,39 +41,20 @@ const ScheduleManager = () => {
       if (!driversResponse.ok) throw new Error('Failed to fetch drivers');
       const driversData = await driversResponse.json();
       console.log(`Successfully fetched ${driversData.length} drivers`);
-      console.log('Driver data structure:', JSON.stringify(driversData, null, 2));
       setDrivers(driversData);
 
       // Get routes from sessionStorage
       console.log('Retrieving routes from sessionStorage...');
       const routesDataRaw = sessionStorage.getItem('routeResults');
-      console.log('Raw routes data from session:', routesDataRaw ? 'Found' : 'Not found');
-      
-      const routesData = JSON.parse(routesDataRaw || '{"routes":[]}');
+      const routesData = routesDataRaw ? JSON.parse(routesDataRaw) : { routes: [] };
       console.log(`Found ${routesData.routes?.length || 0} routes in sessionStorage`);
-      console.log('Routes data structure:', JSON.stringify(routesData, null, 2));
-      
-      if (routesData.routes && routesData.routes.length > 0) {
-        console.log('Sample route data:', routesData.routes[0]);
-      } else {
-        console.warn('No routes found in sessionStorage');
-      }
       setRoutes(routesData.routes || []);
 
       // Get allocations from sessionStorage
       console.log('Retrieving allocations from sessionStorage...');
       const allocationsDataRaw = sessionStorage.getItem('optimizationResults');
-      console.log('Raw allocations data from session:', allocationsDataRaw ? 'Found' : 'Not found');
-      
-      const allocationsData = JSON.parse(allocationsDataRaw || '{"allocations":[]}');
+      const allocationsData = allocationsDataRaw ? JSON.parse(allocationsDataRaw) : { allocations: [] };
       console.log(`Found ${allocationsData.allocations?.length || 0} allocations in sessionStorage`);
-      console.log('Allocations data structure:', JSON.stringify(allocationsData, null, 2));
-      
-      if (allocationsData.allocations && allocationsData.allocations.length > 0) {
-        console.log('Sample allocation data:', allocationsData.allocations[0]);
-      } else {
-        console.warn('No allocations found in sessionStorage');
-      }
       setAllocations(allocationsData.allocations || []);
 
       // Fetch existing assignments for the selected date
@@ -112,17 +92,8 @@ const ScheduleManager = () => {
             
             // Get any existing notes
             initialNotes[routeId] = existingAssignment?.notes || '';
-              
-            if (existingAssignment) {
-              console.log(`Route #${routeId} already assigned to driver ${existingAssignment.driverId}`);
-              if (existingAssignment.notes) {
-                console.log(`Route #${routeId} has notes: ${existingAssignment.notes}`);
-              }
-            }
           });
         }
-        console.log('Initial assignments mapping:', initialAssignments);
-        console.log('Initial notes mapping:', initialNotes);
         setAssignments(initialAssignments);
         setDriverNotes(initialNotes);
       } else {
@@ -140,7 +111,6 @@ const ScheduleManager = () => {
 
   const handleAssignmentChange = (routeId, driverId) => {
     console.log(`Assigning route #${routeId} to driver ID: ${driverId}`);
-    console.log('Driver ID type and format:', typeof driverId, driverId);
     setAssignments(prev => ({
       ...prev,
       [routeId]: driverId
@@ -182,7 +152,6 @@ const ScheduleManager = () => {
       }).filter(item => item.driverId); // Only include routes that have been assigned
       
       console.log(`Saving ${assignmentData.length} assignments for date ${selectedDate}`);
-      console.log('Assignment data to save:', assignmentData);
       
       if (assignmentData.length === 0) {
         setError('No assignments to save. Please assign at least one route to a driver.');
@@ -222,54 +191,16 @@ const ScheduleManager = () => {
     }
   };
 
-  // Improved allocation matching function that handles partial matches
-  const findMatchingAllocation = (route) => {
-    if (!route || !route.start || !route.end) {
-      console.warn('Route is missing start or end:', route);
-      return null;
+  // Find matching allocations for a source and destination
+  const findMatchingAllocations = (source, destinations) => {
+    if (!source || !destinations || destinations.length === 0) {
+      return [];
     }
     
-    console.log(`Trying to match route: ${route.start} -> ${route.end}`);
-    
-    // Exact match on both source and destination
-    const exactMatch = allocations.find(allocation => 
-      allocation.source === route.start && allocation.destination === route.end
+    return allocations.filter(allocation => 
+      allocation.source === source && 
+      destinations.includes(allocation.destination)
     );
-    
-    if (exactMatch) {
-      console.log(`Found exact matching allocation for route ${route.start} -> ${route.end}`);
-      return exactMatch;
-    }
-    
-    // Partial match strategies
-    const partialMatches = allocations.filter(allocation => 
-      allocation.source === route.start || 
-      allocation.destination === route.end ||
-      allocation.source === route.end ||
-      allocation.destination === route.start
-    );
-    
-    if (partialMatches.length > 0) {
-      console.log(`Found ${partialMatches.length} partial matching allocations`);
-      
-      // Prioritize matches that have either start or end matching
-      const priorityMatch = partialMatches.find(allocation => 
-        (allocation.source === route.start && allocation.destination.includes(route.end)) ||
-        (allocation.destination === route.end && allocation.source.includes(route.start))
-      );
-      
-      if (priorityMatch) {
-        console.log(`Found priority partial match:`, priorityMatch);
-        return priorityMatch;
-      }
-      
-      // If no priority match, return the first partial match
-      console.log(`Returning first partial match:`, partialMatches[0]);
-      return partialMatches[0];
-    }
-    
-    console.warn(`No matching allocation found for route ${route.start} -> ${route.end}`);
-    return null;
   };
 
   const handleDateChange = (e) => {
@@ -278,19 +209,81 @@ const ScheduleManager = () => {
     setSelectedDate(newDate);
   };
 
-  if (loading) {
-    return <div className="p-6 text-center">Loading scheduling data...</div>;
-  }
-
   // Find driver name by ID
   const getDriverNameById = (driverId) => {
     const driver = drivers.find(d => d._id === driverId);
     return driver ? driver.name : 'Unknown';
   };
 
-  // Debug what data we have available for matching
-  console.log('Routes for matching:', routes.map(r => ({ id: r.id, start: r.start, end: r.end })));
-  console.log('Allocations for matching:', allocations);
+  // Calculate total packages for a route
+  const calculateTotalPackages = (source, destinations) => {
+    const routeAllocations = findMatchingAllocations(source, destinations);
+    return routeAllocations.reduce((total, allocation) => total + (allocation.quantity || 0), 0);
+  };
+
+  // Format distance for display
+  const formatDistance = (distance) => {
+    if (distance === undefined || distance === null) return 'N/A';
+    return (distance / 1000).toFixed(1) + ' km';
+  };
+
+  // Format time for display
+  const formatTime = (seconds) => {
+    if (seconds === undefined || seconds === null) return 'N/A';
+    return Math.ceil(seconds / 60) + ' min';
+  };
+
+  // Ensure destinations is always an array
+  const normalizeDestinations = (route) => {
+    if (!route) return [];
+    
+    // If destinations is already an array, use it
+    if (route.destinations && Array.isArray(route.destinations)) {
+      return route.destinations;
+    }
+    
+    // If there's a single destination property
+    if (route.destination) {
+      return [route.destination];
+    }
+    
+    // If there's a dest property
+    if (route.dest) {
+      return [route.dest];
+    }
+    
+    // If there's an end property
+    if (route.end) {
+      return [route.end];
+    }
+    
+    return [];
+  };
+
+  // Handle edge cases for routes with missing data
+  const processRouteData = (routes) => {
+    return routes.map(route => {
+      const destinations = normalizeDestinations(route);
+      return {
+        ...route,
+        source: route.source || route.start || route.origin || 'Unknown Source',
+        destinations,
+        distance: route.distance || 0,
+        time: route.time || route.duration || 0
+      };
+    });
+  };
+
+  const processedRoutes = processRouteData(routes);
+
+  if (loading) {
+    return (
+      <div className="p-6 text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
+        <p className="text-gray-600">Loading scheduling data...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full p-6">
@@ -350,61 +343,118 @@ const ScheduleManager = () => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {routes.length > 0 ? (
+          {processedRoutes.length > 0 ? (
             <div className="space-y-4">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Route</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2" style={{ width: "700px" }}>Stops</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Driver Assignment</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       <div className="flex items-center">
                         <FileText className="mr-1" size={14} />
-                        Driver Instructions (Optional)
+                        Driver Instructions
                       </div>
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {routes.map((route, index) => {
+                  {processedRoutes.map((route, index) => {
                     // Generate consistent route ID
                     const routeId = route.id || `${routeJobId}-${index}`;
                     
-                    // Find matching allocation using the improved function
-                    const allocation = findMatchingAllocation(route);
+                    // Get normalized destinations
+                    const destinations = route.destinations || [];
                     
-                    console.log(`Route ${index}: id=${routeId}, start=${route.start}, end=${route.end}`);
-                    console.log(`Matched allocation:`, allocation);
+                    // Find all matching allocations for this route
+                    const routeAllocations = findMatchingAllocations(route.source, destinations);
+                    
+                    // Calculate total packages for this route
+                    const totalPackages = calculateTotalPackages(route.source, destinations);
                     
                     return (
                       <tr key={routeId}>
                         <td className="px-6 py-4">
-                          <div className="flex items-center text-sm text-gray-600 mt-1">
-                            <MapPin className="inline mr-1" size={14} />
-                            <span className="font-medium">From:</span> {route.start || 'N/A'}
+                          <div className="flex items-center text-sm text-gray-900 font-medium">
+                            Route #{index + 1}
                           </div>
                           <div className="flex items-center text-sm text-gray-600 mt-1">
                             <MapPin className="inline mr-1" size={14} />
-                            <span className="font-medium">To:</span> {route.end || 'N/A'}
+                            <span className="font-medium">Source:</span> {route.source || 'N/A'}
                           </div>
-                          {allocation && allocation.destination_customer && (
-                            <div className="flex items-center text-sm text-gray-600 mt-1">
-                              <Store className="inline mr-1" size={14} />
-                              <span className="font-medium">Customer:</span> {allocation.destination_customer}
+                          <div className="text-sm text-gray-500 mt-1">
+                            {formatDistance(route.distance)} · Est. {formatTime(route.time)}
+                          </div>
+                          
+                          <div className="flex items-center text-sm mt-2">
+                            <Navigation className="mr-1" size={14} />
+                            <span className="font-medium">Stops:</span> {destinations.length || 0}
+                          </div>
+                          
+                          <div className="flex items-center text-sm mt-1">
+                            <Package className="inline mr-1" size={14} />
+                            <span className="font-medium">Total Packages:</span> {totalPackages}
+                          </div>
+                          
+                          {route.traffic && (
+                            <div className="text-sm mt-1">
+                              <span className="font-medium">Traffic Conditions:</span>
+                              <div className="mt-1 flex items-center">
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                  <div 
+                                    className="bg-green-500 h-2 rounded-full" 
+                                    style={{ width: `${route.traffic['0'] || 0}%` }}
+                                  ></div>
+                                </div>
+                                <span className="ml-2 text-xs">
+                                  {Math.round(route.traffic['0'] || 0)}% clear
+                                </span>
+                              </div>
                             </div>
                           )}
                         </td>
+                        
                         <td className="px-6 py-4">
-                          <div className="text-sm text-gray-900">Stops: {route.stops?.length || 0}</div>
-                          <div className="text-sm text-gray-500">
-                            Distance: {route.distance ? `${(route.distance / 1000).toFixed(1)} km` : 'N/A'}
-                          </div>
-                          <div className="flex items-center text-sm text-gray-500 mt-1">
-                            <Package className="inline mr-1" size={14} />
-                            <span>Packages:</span> {allocation ? allocation.quantity || 'N/A' : 'N/A'}
+                          <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+                            {destinations.length > 0 ? (
+                              destinations.map((destination, destIndex) => {
+                                const matchingAllocation = allocations.find(a => 
+                                  a.source === route.source && a.destination === destination
+                                );
+                                
+                                return (
+                                  <div key={destIndex} className="border-l-2 border-gray-200 pl-3 py-1">
+                                    <div className="flex items-center text-sm font-medium">
+                                      <span className="mr-1 bg-gray-100 text-gray-600 w-5 h-5 rounded-full flex items-center justify-center text-xs">
+                                        {destIndex + 1}
+                                      </span>
+                                      {destination}
+                                    </div>
+                                    
+                                    {matchingAllocation && (
+                                      <>
+                                        <div className="flex items-center text-sm text-gray-600 mt-1">
+                                          <Store className="inline mr-1" size={14} />
+                                          {matchingAllocation.destination_customer || 'Unknown Customer'}
+                                        </div>
+                                        <div className="flex items-center text-sm text-gray-600 mt-1">
+                                          <Package className="inline mr-1" size={14} />
+                                          {matchingAllocation.quantity || 0} packages
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <div className="text-sm text-gray-500 italic">
+                                No destinations found for this route
+                              </div>
+                            )}
                           </div>
                         </td>
+                        
                         <td className="px-6 py-4 whitespace-nowrap">
                           <select
                             value={assignments[routeId] || ''}
@@ -419,6 +469,7 @@ const ScheduleManager = () => {
                             ))}
                           </select>
                         </td>
+                        
                         <td className="px-6 py-4">
                           <textarea
                             value={driverNotes[routeId] || ''}
@@ -437,15 +488,20 @@ const ScheduleManager = () => {
               <div className="flex justify-end mt-4">
                 <button
                   onClick={handleSaveAssignments}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center"
                 >
+                  <Truck className="mr-2" size={16} />
                   Save Assignments
                 </button>
               </div>
             </div>
           ) : (
-            <div className="text-center p-4 text-gray-500">
-              No routes available for assignment. Please optimize routes first.
+            <div className="text-center p-8 text-gray-500">
+              <div className="flex flex-col items-center">
+                <Navigation size={48} className="text-gray-300 mb-4" />
+                <h3 className="text-lg font-medium mb-2">No routes available for assignment</h3>
+                <p>Please optimize routes first to enable driver scheduling.</p>
+              </div>
             </div>
           )}
         </CardContent>

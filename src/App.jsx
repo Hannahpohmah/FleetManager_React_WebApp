@@ -72,19 +72,23 @@ const App = () => {
   };
 
   // Navigation items
+  // Replace the current navigation items logic with this:
   const navItems = [
     { id: 'map', icon: MapPin, label: 'Route Map' },
     { id: 'upload', icon: Upload, label: 'Upload Data' },
     { id: 'drivers', icon: Users, label: 'Manage Drivers' },
     { id: 'routes', icon: Route, label: 'Route History' },
     // Add the optimizer results tab if we have results
-    ...(optimizationResults && 
-      (Array.isArray(optimizationResults.allocations) && optimizationResults.allocations.length > 0 ||
-       Array.isArray(optimizationResults) && optimizationResults.length > 0) 
-     ? [{ id: 'optimizer_result', icon: FileSpreadsheet, label: 'Allocation Results' }] 
-     : []),
-    // Add the route results tab if we have results
-    ...(optimizationResults ? [{ id: 'Route_Result', icon: Navigation, label: 'Route Results' }] : [])
+    ...(optimizationResults && (
+      (optimizationResults.allocations && optimizationResults.allocations.length > 0) || 
+      (Array.isArray(optimizationResults) && optimizationResults.length > 0) ||
+      (optimizationResults.routes && optimizationResults.routes.length > 0)
+    ) ? [{ id: 'optimizer_result', icon: FileSpreadsheet, label: 'Allocation Results' }] : []),
+    // Add the route results tab if we have results with routes
+    ...(optimizationResults && (
+      (optimizationResults.routes && optimizationResults.routes.length > 0) ||
+      (optimizationResults.results && optimizationResults.results.routes && optimizationResults.results.routes.length > 0)
+    ) ? [{ id: 'Route_Result', icon: Navigation, label: 'Route Results' }] : [])
   ];
 
   // Dashboard stats
@@ -126,12 +130,13 @@ const App = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                  {activeTab === 'map' && (
-                    <MapSection 
-                      currentLocation={currentLocation} 
-                      directions={directions} 
-                      setMap={setMap}
-                    />
+                {activeTab === 'map' && (
+                <MapSection 
+                  routes={routes} 
+                  render={true}
+                  setDirections={setDirections}
+                  currentLocation={currentLocation}
+                />  
                   )}
                   {activeTab === 'upload' && (
                     <UploadSection 

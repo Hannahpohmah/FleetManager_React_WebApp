@@ -281,14 +281,14 @@ class TransportNetwork:
         print(f"Network has {len(self.street_to_nodes)} unique streets")
 
 # ----------------------- RoutePlanner -----------------------
-# ----------------------- RoutePlanner -----------------------
-
 class ImprovedRoutePlanner:
     def __init__(self, network: TransportNetwork, agent: ImprovedRLAgent):
         self.network = network
         self.agent = agent
         self.shortest_path_cache = {}  # Cache for shortest paths
         self.state_cache = {}  # Cache for states
+        self.connectivity_cache = {}  # Cache for connectivity checks
+        self.distance_cache = {}  # Cache for distance calculations
 
     def _get_street_nodes(self, street: str) -> Set[str]:
         """Get all nodes associated with a street."""
@@ -302,20 +302,20 @@ class ImprovedRoutePlanner:
         # Replace string concatenation with more efficient representation
         edges = list(self.network.graph.edges(node, data=True))
         connectivity = self.network.graph.nodes[node].get('connectivity', 0)
-        
+
         if not edges:
             return f"{node}|c{connectivity}|t0.0|b{1 if node in self.network.bottleneck_nodes else 0}|"
-        
+
         # Use array operations instead of list comprehensions
         traffic_sum = 0
         traffic_conditions = []
         for _, dest, data in edges:
             traffic_sum += data['traffic_state'].value
             traffic_conditions.append(f"{dest}:{data['traffic_state'].value}")
-        
+
         avg_traffic = traffic_sum / len(edges)
         is_bottleneck = 1 if node in self.network.bottleneck_nodes else 0
-        
+
         # Join once at the end
         return f"{node}|c{connectivity}|t{avg_traffic:.1f}|b{is_bottleneck}|{'_'.join(sorted(traffic_conditions))}"
 
@@ -384,6 +384,34 @@ class ImprovedRoutePlanner:
 
             if not street_path or street_path[-1] != edge['street_name']:
                 street_path.append(edge['street_name'])
+        
+        # Find and add the end destination street name
+        end_node = path[-1]
+        
+        # Improved method to find the end street
+        # First check if we already have a segment with the end node as destination
+        if segments and segments[-1].to_node == end_node:
+            end_street = segments[-1].street_name
+        else:
+            # Fallback method: search for the street by end node
+            end_street = None
+            
+            # Find streets containing the end node
+            for street, nodes in self.network.street_to_nodes.items():
+                for node_info in nodes:
+                    # Check if this is the correct format for node_info
+                    if isinstance(node_info, tuple) and node_info[0] == end_node:
+                        end_street = street
+                        break
+                    elif node_info == end_node:  # Alternative format check
+                        end_street = street
+                        break
+                if end_street:
+                    break
+        
+        # Explicitly add the end street to the path if it's not already there
+        if end_street and (not street_path or street_path[-1] != end_street):
+            street_path.append(end_street)
 
         if total_distance > 0:
             # Calculate distribution based on distance, not segment count
@@ -403,15 +431,14 @@ class ImprovedRoutePlanner:
             traffic_distribution=traffic_distribution,
             segments=segments
         )
-
     def find_route(self, start_street: str, end_street: str,
-               min_episodes: int = 1000,
-               max_episodes: int = 3000,
-               success_threshold: float = 0.7) -> RouteResult:
+           min_episodes: int = 1000,
+           max_episodes: int = 3000,
+           success_threshold: float = 0.7) -> RouteResult:
         """Find optimal route between two streets using enhanced RL approach with performance optimizations."""
         start_time = time.time()
         print(f"Finding route from {start_street} to {end_street}")
-        
+
         # Validate input streets
         if start_street not in self.network.street_to_nodes:
             raise ValueError(f"Start street '{start_street}' not found in network")
@@ -431,17 +458,10 @@ class ImprovedRoutePlanner:
         print(f"Finding route from {start_street} ({len(start_nodes)} nodes) to {end_street} ({len(end_nodes)} nodes)")
 
         # Check if path exists using bidirectional search
-        if hasattr(self, 'connectivity_cache'):
-            connected = self.connectivity_cache.get((start_street, end_street))
-            if connected is not None:
-                path_exists = connected
-                print(f"Using cached connectivity info: {'connected' if path_exists else 'not connected'}")
-            else:
-                path_exists = self._check_connectivity(start_nodes, end_nodes)
-                self.connectivity_cache[(start_street, end_street)] = path_exists
+        if (start_street, end_street) in self.connectivity_cache:
+            path_exists = self.connectivity_cache[(start_street, end_street)]
+            print(f"Using cached connectivity info: {'connected' if path_exists else 'not connected'}")
         else:
-            # Initialize connectivity cache
-            self.connectivity_cache = {}
             path_exists = self._check_connectivity(start_nodes, end_nodes)
             self.connectivity_cache[(start_street, end_street)] = path_exists
 
@@ -456,7 +476,7 @@ class ImprovedRoutePlanner:
         # Dynamically adjust episode counts based on network complexity
         network_size_factor = min(1.0, 50000 / len(self.network.graph))  # Scale down for larger networks
         distance_factor = 1.0  # Will be updated if we can estimate distance
-        
+
         # Try to estimate distance between streets to adjust episode count
         if len(start_nodes) > 0 and len(end_nodes) > 0:
             try:
@@ -465,21 +485,21 @@ class ImprovedRoutePlanner:
                 sample_end = next(iter(end_nodes))
                 sample_path = nx.shortest_path(self.network.graph, sample_start, sample_end)
                 path_length = len(sample_path)
-                
+
                 # Adjust factors based on path complexity
                 distance_factor = min(1.0, 100 / path_length)  # Scale down for longer paths
                 print(f"Estimated path length: {path_length} nodes")
             except:
                 print("Could not estimate path length")
-        
+
         # Adjust episode counts
         adjusted_min_episodes = int(min_episodes * network_size_factor * distance_factor)
         adjusted_max_episodes = int(max_episodes * network_size_factor * distance_factor)
-        
+
         # Ensure minimums
         adjusted_min_episodes = max(100, adjusted_min_episodes)
         adjusted_max_episodes = max(adjusted_min_episodes + 500, adjusted_max_episodes)
-        
+
         print(f"Adjusted episode range: {adjusted_min_episodes} to {adjusted_max_episodes}")
 
         # Try multiple node pairs with intelligent selection
@@ -487,19 +507,19 @@ class ImprovedRoutePlanner:
         best_reward = float('-inf')
         attempts = 0
         max_attempts = min(9, len(start_nodes) * len(end_nodes))  # Limit number of attempts
-        
+
         # Create a prioritized list of node pairs to try
         node_pairs = []
-        
+
         for start_node in start_nodes:
             for end_node in end_nodes:
                 if start_node == end_node:
                     continue
-                    
+
                 # Calculate priority based on connectivity and distance (if available)
                 start_connectivity = self.network.graph.nodes[start_node].get('connectivity', 0)
                 end_connectivity = self.network.graph.nodes[end_node].get('connectivity', 0)
-                
+
                 # Try to get distance between nodes
                 try:
                     distance = nx.shortest_path_length(self.network.graph, start_node, end_node)
@@ -508,30 +528,30 @@ class ImprovedRoutePlanner:
                 except:
                     # If distance can't be calculated, just use connectivity
                     priority = start_connectivity + end_connectivity
-                    
+
                 node_pairs.append((start_node, end_node, priority))
-        
+
         # Sort by priority (highest first)
         node_pairs.sort(key=lambda x: x[2], reverse=True)
-        
+
         # Take top N pairs
         top_pairs = node_pairs[:max_attempts]
         print(f"Will try {len(top_pairs)} node pairs, prioritized by connectivity and distance")
-        
+
         # Track overall progress
         successful_attempts = 0
         total_episodes = 0
-        
+
         # Try each pair
         for start_node, end_node, priority in top_pairs:
             attempts += 1
             print(f"\nAttempt {attempts}/{len(top_pairs)}: Route from node {start_node} to {end_node} (priority: {priority:.2f})")
-            
+
             # Early exit if we've already found a good route and tried enough pairs
             if best_route and successful_attempts >= 2 and attempts >= 3:
                 print(f"Already found {successful_attempts} successful routes, stopping further attempts")
                 break
-                
+
             # Adjust episode count dynamically based on progress
             if successful_attempts > 0:
                 # Reduce episodes for later attempts if we already have successful routes
@@ -540,20 +560,20 @@ class ImprovedRoutePlanner:
             else:
                 current_min_episodes = adjusted_min_episodes
                 current_max_episodes = adjusted_max_episodes
-                
+
             # Further reduce for low-priority pairs
             if attempts > 2:
                 current_min_episodes = current_min_episodes // 2
                 current_max_episodes = current_max_episodes // 2
-            
+
             # Find route for this pair
             route = self._improved_train_route(
-                start_node, end_node, 
-                current_min_episodes, 
-                current_max_episodes, 
+                start_node, end_node,
+                current_min_episodes,
+                current_max_episodes,
                 success_threshold
             )
-            
+
             if route and route.success:
                 successful_attempts += 1
                 reward = -route.total_time
@@ -563,7 +583,7 @@ class ImprovedRoutePlanner:
                     best_route = route
                     best_reward = reward
                     print(f"New best route found!")
-                    
+
                     # If this route is particularly good, consider stopping early
                     if route.total_distance < 1.3 * nx.shortest_path_length(
                         self.network.graph, start_node, end_node, weight='length'):
@@ -577,17 +597,459 @@ class ImprovedRoutePlanner:
                 raise ValueError("Logic error: Had successful attempts but no best route")
             raise ValueError(f"No valid route found between {start_street} and {end_street}")
 
+        # Ensure the end street is added to the route's street path
+        if best_route.street_path and best_route.street_path[-1] != end_street:
+            best_route.street_path.append(end_street)
+
         # Report total time
         elapsed = time.time() - start_time
         print(f"Route finding completed in {elapsed:.2f} seconds")
         print(f"Final route: {len(best_route.path)} nodes, {best_route.total_distance:.0f}m, {best_route.total_time:.1f}s")
-        
+
         return best_route
+    def find_multi_stop_route(self, start_street: str, destination_streets: List[str],
+                  min_episodes: int = 1000, max_episodes: int = 3000,
+                      success_threshold: float = 0.7) -> RouteResult:
+        """
+        Find a route from start_street through all destination_streets in the optimal order,
+        with improved logic to avoid revisiting streets when possible.
+
+        Args:
+            start_street: Starting street
+            destination_streets: List of destination streets to visit in any order
+            min_episodes: Minimum number of training episodes per segment
+            max_episodes: Maximum number of training episodes per segment
+            success_threshold: Success rate threshold for early stopping
+
+        Returns:
+            RouteResult object representing the complete route
+        """
+        if not destination_streets:
+            raise ValueError("At least one destination street must be provided")
+
+        start_time = time.time()
+        print(f"Finding optimal multi-stop route from {start_street} through {len(destination_streets)} destinations")
+
+        # Validate all streets exist
+        for street in [start_street] + destination_streets:
+            if street not in self.network.street_to_nodes:
+                raise ValueError(f"Street '{street}' not found in network")
+
+        # Compute distances between all pairs of streets (including start)
+        all_streets = [start_street] + destination_streets
+        distance_matrix = {}
+
+        print("Computing distances between all street pairs...")
+        for i, street1 in enumerate(all_streets):
+            distance_matrix[street1] = {}
+            for j, street2 in enumerate(all_streets):
+                if i == j:
+                    distance_matrix[street1][street2] = 0
+                    continue
+
+                # Skip redundant calculations
+                if street2 in distance_matrix and street1 in distance_matrix[street2]:
+                    distance_matrix[street1][street2] = distance_matrix[street2][street1]
+                    continue
+
+                # Estimate distance between streets
+                try:
+                    # Use the first node of each street for estimation
+                    start_nodes = self._get_street_nodes(street1)
+                    end_nodes = self._get_street_nodes(street2)
+
+                    # Find the shortest path between any pair of nodes
+                    min_distance = float('inf')
+                    for start_node in list(start_nodes)[:3]:  # Limit to 3 nodes for efficiency
+                        for end_node in list(end_nodes)[:3]:
+                            try:
+                                path_length = nx.shortest_path_length(
+                                    self.network.graph, start_node, end_node, weight='length')
+                                min_distance = min(min_distance, path_length)
+                            except:
+                                continue
+
+                    if min_distance == float('inf'):
+                        # Fallback to topological distance if length-based fails
+                        for start_node in list(start_nodes)[:3]:
+                            for end_node in list(end_nodes)[:3]:
+                                try:
+                                    path_length = len(nx.shortest_path(self.network.graph, start_node, end_node))
+                                    min_distance = min(min_distance, path_length * 100)  # Rough estimate
+                                except:
+                                    continue
+
+                    if min_distance == float('inf'):
+                        print(f"Warning: Could not find distance between {street1} and {street2}")
+                        min_distance = 10000  # Some large default value
+
+                    distance_matrix[street1][street2] = min_distance
+                except Exception as e:
+                    print(f"Error estimating distance between {street1} and {street2}: {str(e)}")
+                    distance_matrix[street1][street2] = 10000  # Default large value
+
+        # Find optimal order using nearest neighbor heuristic
+        current_street = start_street
+        unvisited = set(destination_streets)
+        optimal_order = [current_street]
+
+        while unvisited:
+            # Find nearest unvisited street
+            next_street = min(unvisited,
+                              key=lambda s: distance_matrix[current_street][s])
+            optimal_order.append(next_street)
+            unvisited.remove(next_street)
+            current_street = next_street
+
+        print(f"Optimal visiting order: {' → '.join(optimal_order)}")
+
+        # Create route segments between consecutive stops in the optimal order
+        current_street = start_street
+        segment_routes = []
+        visited_streets = set()  # Track streets we've already visited
+        visited_edges = set()    # Track edges we've already traversed
+        
+        # Track which destination streets have been officially visited as stops
+        visited_destination_streets = set()
+        remaining_destination_streets = set(destination_streets)
+
+        for i, next_street in enumerate(optimal_order[1:]):
+            print(f"\n==== Finding route segment {i+1}/{len(optimal_order)-1}: {current_street} → {next_street} ====")
+
+            # Handle case when consecutive streets are the same
+            if current_street == next_street:
+                print(f"Current and next streets are the same, skipping segment")
+                # Create a minimal route result for the same street
+                start_node, end_node = self.network.street_to_nodes[current_street][0]
+                segment = self._create_route_result([start_node, end_node])
+                segment_routes.append(segment)
+                
+                # Mark current destination as visited and remove from remaining
+                visited_destination_streets.add(next_street)
+                if next_street in remaining_destination_streets:
+                    remaining_destination_streets.remove(next_street)
+            else:
+                # Find route for this segment with penalty for revisited streets
+                try:
+                    # Scale down episodes for intermediate segments to improve overall performance
+                    segment_min_episodes = min_episodes
+                    segment_max_episodes = max_episodes
+
+                    # For very long multi-stop routes, scale down episodes for middle segments
+                    if len(optimal_order) > 4 and 0 < i < len(optimal_order) - 2:
+                        segment_min_episodes = int(min_episodes * 0.7)
+                        segment_max_episodes = int(max_episodes * 0.7)
+
+                    # Create a temporary modified graph with penalties for revisited streets
+                    if visited_streets and i > 0:
+                        # Print the streets being penalized for clarity
+                        print(f"Penalized streets: {', '.join(sorted(visited_streets))}")
+                        
+                        # Create a modified graph with penalties that exempt remaining destinations
+                        modified_graph = self._create_modified_graph_with_penalties(
+                            visited_streets, 
+                            visited_edges,
+                            remaining_destination_streets  # Pass remaining destinations to exempt them
+                        )
+
+                        # Temporarily swap the graphs
+                        original_graph = self.network.graph
+                        self.network.graph = modified_graph
+
+                        print(f"Applied penalties to {len(visited_streets)} previously visited streets, exempting {len(remaining_destination_streets)} remaining destinations")
+
+                        try:
+                            segment = self.find_route(
+                                current_street, next_street,
+                                min_episodes=segment_min_episodes,
+                                max_episodes=segment_max_episodes,
+                                success_threshold=success_threshold
+                            )
+                        finally:
+                            # Restore original graph
+                            self.network.graph = original_graph
+                    else:
+                        # First segment, use original graph
+                        segment = self.find_route(
+                            current_street, next_street,
+                            min_episodes=segment_min_episodes,
+                            max_episodes=segment_max_episodes,
+                            success_threshold=success_threshold
+                        )
+
+                    # Update visited streets and edges
+                    if segment.success:
+                        # Add all streets in this segment to visited streets
+                        visited_streets.update(segment.street_path)
+
+                        # Add all edges in this segment to visited edges
+                        for seg in segment.segments:
+                            visited_edges.add((seg.from_node, seg.to_node))
+                        
+                        # Mark current destination as visited and remove from remaining
+                        visited_destination_streets.add(next_street)
+                        if next_street in remaining_destination_streets:
+                            remaining_destination_streets.remove(next_street)
+
+                        segment_routes.append(segment)
+                    else:
+                        raise ValueError(f"Failed to find route segment from {current_street} to {next_street}")
+                except ValueError as e:
+                    raise ValueError(f"Failed to find route segment from {current_street} to {next_street}: {str(e)}")
+
+            # Update current street for next iteration
+            current_street = next_street
+
+        # Combine segments into a single route
+        if not segment_routes:
+            raise ValueError("No route segments were created")
+
+        combined_path = []
+        combined_street_path = []
+        combined_segments = []
+        total_distance = 0
+        total_time = 0
+        traffic_counts = {state: 0 for state in TrafficState}
+
+        # Define mandatory streets for later use
+        mandatory_streets = set(optimal_order)
+
+        # FIXED: Properly combine segments to ensure the route visits each destination in optimal order
+        print("\nCombining route segments...")
+        
+        # Create a mapping from destinations to their position in the optimal order
+        optimal_order_positions = {street: i for i, street in enumerate(optimal_order)}
+        
+        for i, segment in enumerate(segment_routes):
+            if not segment.success:
+                street_from = optimal_order[i]
+                street_to = optimal_order[i+1]
+                raise ValueError(f"Segment {i+1} ({street_from} to {street_to}) failed")
+
+            # Print segment details for debugging
+            print(f"Segment {i+1}: {len(segment.path)} nodes, {segment.total_distance:.0f}m, from {optimal_order[i]} to {optimal_order[i+1]}")
+
+            # Add path, avoiding duplicating nodes between segments
+            if i == 0:
+                combined_path.extend(segment.path)
+                # Also add all streets for the first segment
+                combined_street_path.extend(segment.street_path)
+            else:
+                # Check if we can connect segments properly
+                if combined_path[-1] == segment.path[0]:
+                    # Skip the first node to avoid duplication
+                    combined_path.extend(segment.path[1:])
+                else:
+                    print(f"Warning: Gap between segments {i} and {i+1}")
+                    print(f"  Last node of previous segment: {combined_path[-1]}")
+                    print(f"  First node of current segment: {segment.path[0]}")
+                    # We have a gap, so add all nodes
+                    combined_path.extend(segment.path)
+                
+                # FIXED: For streets, we need to be smarter about including waypoints
+                for j, street in enumerate(segment.street_path):
+                    # Always include the first street of a segment (it's a waypoint)
+                    # or include any street that's not a duplicate of the previous street
+                    if (j == 0 and street in mandatory_streets) or \
+                      (not combined_street_path or combined_street_path[-1] != street):
+                        combined_street_path.append(street)
+
+            # Add all segments
+            combined_segments.extend(segment.segments)
+
+            # Accumulate statistics
+            total_distance += segment.total_distance
+            total_time += segment.total_time
+
+            # Accumulate traffic counts
+            for state, percentage in segment.traffic_distribution.items():
+                # Convert percentage back to distance
+                distance = percentage * segment.total_distance / 100
+                traffic_counts[state] += distance
+
+        # Verify all mandatory streets are in the path
+        # Create sets for easier checking
+        combined_street_set = set(combined_street_path)
+        missing_streets = mandatory_streets - combined_street_set
+        
+        if missing_streets:
+            print(f"\nWarning: Some mandatory streets are missing from the combined path: {missing_streets}")
+            print("Ensuring all mandatory streets are included...")
+            
+            # FIXED: Better approach to insert missing streets at appropriate positions
+            for missing_street in missing_streets:
+                # Find the position in the optimal order
+                missing_idx = optimal_order.index(missing_street)
+                
+                # Find where to insert it in the combined path
+                if missing_idx == 0:
+                    # Insert at the beginning if it's the start street
+                    combined_street_path.insert(0, missing_street)
+                else:
+                    # Find the previous street in optimal order
+                    prev_street = optimal_order[missing_idx - 1]
+                    
+                    # Try to find the position after the previous street
+                    if prev_street in combined_street_path:
+                        insert_pos = combined_street_path.index(prev_street) + 1
+                        combined_street_path.insert(insert_pos, missing_street)
+                    else:
+                        # Fallback - insert based on next street if available
+                        next_idx = missing_idx + 1
+                        if next_idx < len(optimal_order):
+                            next_street = optimal_order[next_idx]
+                            if next_street in combined_street_path:
+                                insert_pos = combined_street_path.index(next_street)
+                                combined_street_path.insert(insert_pos, missing_street)
+                                continue
+                        
+                        # If all else fails, just append to the end
+                        print(f"  Could not determine proper position for {missing_street}, appending to end")
+                        combined_street_path.append(missing_street)
+        
+        # Calculate combined traffic distribution
+        if total_distance > 0:
+            traffic_distribution = {
+                state: (distance / total_distance * 100)
+                for state, distance in traffic_counts.items()
+            }
+        else:
+            traffic_distribution = {state: 0 for state in TrafficState}
+
+        # Create combined route result
+        combined_route = RouteResult(
+            path=combined_path,
+            street_path=combined_street_path,
+            total_distance=total_distance,
+            total_time=total_time,
+            success=True,
+            traffic_distribution=traffic_distribution,
+            segments=combined_segments
+        )
+
+        # Report total time and statistics
+        elapsed = time.time() - start_time
+        print(f"\n==== Multi-stop route completed in {elapsed:.2f} seconds ====")
+        print(f"Total route: {len(combined_path)} nodes, {combined_route.total_distance:.0f}m, {combined_route.total_time:.1f}s")
+        print(f"Street sequence: {' → '.join(combined_street_path)}")
+        
+        # Verify that all destination streets are in the final path
+        all_destinations_included = all(street in combined_street_path for street in destination_streets)
+        optimal_order_preserved = True
+        
+        # Check if optimal order is preserved by finding the indices of each street in the combined path
+        street_indices = {street: combined_street_path.index(street) if street in combined_street_path else -1 
+                        for street in optimal_order}
+        
+        # Check if the order matches
+        for i in range(1, len(optimal_order)):
+            if street_indices[optimal_order[i-1]] > street_indices[optimal_order[i]]:
+                optimal_order_preserved = False
+                break
+        
+        print(f"All destinations included: {'Yes' if all_destinations_included else 'No'}")
+        print(f"Optimal order preserved: {'Yes' if optimal_order_preserved else 'No'}")
+
+        return combined_route
+
+    def _create_modified_graph_with_penalties(self, visited_streets, visited_edges, exempt_streets=None):
+        """
+        Create a modified copy of the network graph with penalties for already visited streets,
+        but exempting streets that are still in our destination list.
+        
+        Args:
+            visited_streets: Set of street names that have already been visited
+            visited_edges: Set of (from_node, to_node) tuples that have already been traversed
+            exempt_streets: Set of street names that should be exempt from penalties (remaining destinations)
+        
+        Returns:
+            A modified copy of the network graph
+        """
+        # Create a deep copy of the graph
+        import copy
+        modified_graph = copy.deepcopy(self.network.graph)
+        
+        # Initialize exempt_streets if not provided
+        if exempt_streets is None:
+            exempt_streets = set()
+        
+        # Count penalized edges for reporting
+        penalized_edges = 0
+        
+        # Apply penalties to edges on visited streets
+        for u, v, data in modified_graph.edges(data=True):
+            street_name = data.get('street_name')
+            
+            # Skip penalty if this street is a remaining destination
+            if street_name in exempt_streets:
+                continue
+                    
+            # Higher penalty for edges we've directly traversed
+            if (u, v) in visited_edges or (v, u) in visited_edges:
+                # Apply a significant penalty to directly traversed edges
+                data['length'] = data['length'] * 5.0
+                penalized_edges += 1
+            # Smaller penalty for any edge on a street we've visited
+            elif street_name in visited_streets:
+                # Apply a moderate penalty to edges on visited streets
+                data['length'] = data['length'] * 2.0
+                penalized_edges += 1
+        
+        print(f"Applied penalties to {penalized_edges} edges")
+        
+        return modified_graph
+
+    def _create_modified_graph_with_penalties(self, visited_streets, visited_edges, exempt_streets=None):
+        """
+        Create a modified copy of the network graph with penalties for already visited streets,
+        but exempting streets that are still in our destination list.
+        
+        Args:
+            visited_streets: Set of street names that have already been visited
+            visited_edges: Set of (from_node, to_node) tuples that have already been traversed
+            exempt_streets: Set of street names that should be exempt from penalties (remaining destinations)
+        
+        Returns:
+            A modified copy of the network graph
+        """
+        # Create a deep copy of the graph
+        import copy
+        modified_graph = copy.deepcopy(self.network.graph)
+        
+        # Initialize exempt_streets if not provided
+        if exempt_streets is None:
+            exempt_streets = set()
+        
+        # Count penalized edges for reporting
+        penalized_edges = 0
+        
+        # Apply penalties to edges on visited streets
+        for u, v, data in modified_graph.edges(data=True):
+            street_name = data.get('street_name')
+            
+            # Skip penalty if this street is a remaining destination
+            if street_name in exempt_streets:
+                continue
+                    
+            # Higher penalty for edges we've directly traversed
+            if (u, v) in visited_edges or (v, u) in visited_edges:
+                # Apply a significant penalty to directly traversed edges
+                data['length'] = data['length'] * 5.0
+                penalized_edges += 1
+            # Smaller penalty for any edge on a street we've visited
+            elif street_name in visited_streets:
+                # Apply a moderate penalty to edges on visited streets
+                data['length'] = data['length'] * 2.0
+                penalized_edges += 1
+        
+        print(f"Applied penalties to {penalized_edges} edges")
+        
+        return modified_graph
 
     def _check_connectivity(self, start_nodes, end_nodes):
         """Check if any path exists between start and end nodes using bidirectional search."""
         print("Checking path existence...")
-        
+
         # For very large node sets, sample a subset
         if len(start_nodes) > 20 or len(end_nodes) > 20:
             start_sample = random.sample(list(start_nodes), min(20, len(start_nodes)))
@@ -595,7 +1057,7 @@ class ImprovedRoutePlanner:
         else:
             start_sample = list(start_nodes)
             end_sample = list(end_nodes)
-        
+
         # Try to find any path between the samples
         for start_node in start_sample:
             for end_node in end_sample:
@@ -604,7 +1066,7 @@ class ImprovedRoutePlanner:
                         return True
                 except Exception as e:
                     continue
-        
+
         # Fall back to more thorough check if samples don't find a path
         if len(start_sample) < len(start_nodes) or len(end_sample) < len(end_nodes):
             print("Initial sample check failed, performing more thorough check...")
@@ -613,7 +1075,7 @@ class ImprovedRoutePlanner:
             backward_frontier = set(end_nodes)
             visited_forward = set(forward_frontier)
             visited_backward = set(backward_frontier)
-            
+
             max_steps = 10
             for _ in range(max_steps):
                 # Expand forward
@@ -621,33 +1083,33 @@ class ImprovedRoutePlanner:
                 for node in forward_frontier:
                     neighbors = set(self.network.graph.neighbors(node))
                     new_forward.update(neighbors - visited_forward)
-                
+
                 visited_forward.update(new_forward)
                 forward_frontier = new_forward
-                
+
                 # Check intersection
                 if not visited_forward.isdisjoint(visited_backward):
                     return True
-                    
+
                 # Expand backward
                 new_backward = set()
                 for node in backward_frontier:
-                    neighbors = set(self.network.graph.predecessors(node) 
-                                if self.network.graph.is_directed() 
+                    neighbors = set(self.network.graph.predecessors(node)
+                                if self.network.graph.is_directed()
                                 else self.network.graph.neighbors(node))
                     new_backward.update(neighbors - visited_backward)
-                
+
                 visited_backward.update(new_backward)
                 backward_frontier = new_backward
-                
+
                 # Check intersection
                 if not visited_forward.isdisjoint(visited_backward):
                     return True
-                    
+
                 # Early termination if frontiers are empty
                 if not forward_frontier or not backward_frontier:
                     break
-        
+
         return False
 
     def _select_promising_nodes(self, start_nodes, end_nodes):
@@ -660,22 +1122,22 @@ class ImprovedRoutePlanner:
             is_bottleneck = 1 if node in self.network.bottleneck_nodes else 0
             score = connectivity * (2 - is_bottleneck)
             start_scores.append((node, score))
-        
+
         end_scores = []
         for node in end_nodes:
             connectivity = self.network.graph.nodes[node].get('connectivity', 0)
             is_bottleneck = 1 if node in self.network.bottleneck_nodes else 0
             score = connectivity * (2 - is_bottleneck)
             end_scores.append((node, score))
-        
+
         # Sort by score and take top N nodes
         start_scores.sort(key=lambda x: x[1], reverse=True)
         end_scores.sort(key=lambda x: x[1], reverse=True)
-        
+
         # Take top 5 or fewer if not enough nodes
         top_start = [node for node, _ in start_scores[:min(5, len(start_scores))]]
         top_end = [node for node, _ in end_scores[:min(5, len(end_scores))]]
-        
+
         # For diversity, include a random node if we have more than 5
         if len(start_nodes) > 5:
             remaining = list(set(start_nodes) - set(top_start))
@@ -683,14 +1145,14 @@ class ImprovedRoutePlanner:
                 random_node = random.choice(remaining)
                 if random_node not in top_start:
                     top_start.append(random_node)
-        
+
         if len(end_nodes) > 5:
             remaining = list(set(end_nodes) - set(top_end))
             if remaining:
                 random_node = random.choice(remaining)
                 if random_node not in top_end:
                     top_end.append(random_node)
-        
+
         return top_start, top_end
 
     def _improved_train_route(self, start_node: str, end_node: str,
@@ -737,8 +1199,8 @@ class ImprovedRoutePlanner:
         distance_to_end = {}
         # Define the bounded subgraph to work with
         bounded_nodes = set()
-        
-        if hasattr(self, 'distance_cache') and end_node in self.distance_cache:
+
+        if end_node in self.distance_cache:
             print("Using cached distance data")
             distance_to_end = self.distance_cache[end_node]
         else:
@@ -746,49 +1208,47 @@ class ImprovedRoutePlanner:
             # Use Dijkstra's algorithm once instead of multiple shortest_path_length calls
             lengths = nx.single_source_dijkstra_path_length(self.network.graph, end_node)
             distance_to_end = lengths
-            
+
             # Cache for future use
-            if not hasattr(self, 'distance_cache'):
-                self.distance_cache = {}
             self.distance_cache[end_node] = distance_to_end
-        
+
         # Create bounded search space for efficiency
         if shortest_path:
             search_distance = min(shortest_length * 2, 500)  # Reasonable upper bound
             for node in self.network.graph.nodes():
                 if node in distance_to_end and distance_to_end[node] <= search_distance:
                     bounded_nodes.add(node)
-            
+
             # Always include shortest path nodes
             bounded_nodes.update(shortest_path)
             print(f"Bounded search space: {len(bounded_nodes)} nodes")
         else:
             # If no shortest path, use a larger bounded area
             bounded_nodes = set(self.network.graph.nodes())
-        
+
         # Create subgraph for faster operations
         if len(bounded_nodes) < len(self.network.graph.nodes()):
             subgraph = self.network.graph.subgraph(bounded_nodes)
             print(f"Using subgraph with {len(subgraph)} nodes and {subgraph.number_of_edges()} edges")
         else:
             subgraph = self.network.graph
-        
+
         successful_paths = []
         best_reward = float('-inf')
         best_path = None
-        
+
         # Tracking variables for early stopping
         best_progress = 0
         stagnation_count = 0
         success_streak = 0
-        
+
         # Adjust episode count based on path complexity
         adjusted_max_episodes = min(max_episodes, max(min_episodes, shortest_length * 20))
         print(f"Will run up to {adjusted_max_episodes} episodes")
-        
+
         # Precompute node neighbors for faster access during training
         neighbor_cache = {node: list(subgraph.neighbors(node)) for node in bounded_nodes}
-        
+
         # Precompute states for frequently visited nodes
         state_cache = {}
 
@@ -796,20 +1256,20 @@ class ImprovedRoutePlanner:
         import time
         start_time = time.time()
         last_report_time = start_time
-        
+
         # Training loop
         for episode in range(adjusted_max_episodes):
             current = start_node
             path = [current]
             total_reward = 0
             visited = {current}
-            
+
             # Try to reach each waypoint in sequence
             for waypoint_idx, target in enumerate(waypoints):
                 # Reset for each waypoint segment
                 steps_to_target = 0
                 max_steps_to_target = max(100, shortest_length)
-                
+
                 while current != target and steps_to_target < max_steps_to_target:
                     # Get state (with caching for frequently visited nodes)
                     if current in state_cache:
@@ -823,18 +1283,18 @@ class ImprovedRoutePlanner:
                     # Consider neighbors that haven't been visited in this segment
                     valid_actions = [n for n in neighbor_cache.get(current, [])
                                   if n not in visited or steps_to_target > 50]
-                    
+
                     if not valid_actions:
                         break
-                    
+
                     # Exploration-exploitation balance with dynamic adjustment
                     explore_rate = self.agent.epsilon * (1 - (steps_to_target / max_steps_to_target * 0.5))
-                    
+
                     # Choose action with targeted exploration
                     if random.random() < explore_rate:
                         # Guided random selection - bias toward nodes closer to target
                         if random.random() < 0.7 and target in distance_to_end:
-                            # Sort by distance to target and pick from first half 
+                            # Sort by distance to target and pick from first half
                             candidates = [(n, distance_to_end.get(n, 1000)) for n in valid_actions if n in distance_to_end]
                             if candidates:
                                 candidates.sort(key=lambda x: x[1])
@@ -845,144 +1305,111 @@ class ImprovedRoutePlanner:
                             next_node = random.choice(valid_actions)
                     else:
                         next_node = self.agent.choose_action(state, valid_actions, is_training=True)
-                    
+
                     # Fast reward calculation
                     edge = subgraph[current][next_node]
                     traffic_multiplier = 1 + (edge['traffic_state'].value * 0.25)
                     time_cost = edge['length'] / edge['speed_limit'] * traffic_multiplier
                     base_reward = -time_cost
-                    
+
                     # Efficient progress reward
                     current_distance = distance_to_end.get(current, 1000)
                     next_distance = distance_to_end.get(next_node, 1000)
                     progress_reward = (current_distance - next_distance) * 20
-                    
+
+
                     # Waypoint bonuses for guided learning
                     waypoint_bonus = 0
                     if next_node == target:
-                        # Higher reward for final target
-                        waypoint_bonus = 2000 if target == end_node else 500
-                        
-                        # Additional bonus for completing the segment efficiently
-                        if steps_to_target < shortest_length * 1.5:
-                            waypoint_bonus += 200
-                    
-                    # Calculate combined reward
+                        waypoint_bonus = 500  # Large bonus for reaching waypoint
+
                     reward = base_reward + progress_reward + waypoint_bonus
-                    
-                    # Update agent (batch updates for efficiency)
-                    next_state = self._get_state(next_node) if next_node not in state_cache else state_cache[next_node]
-                    next_actions = neighbor_cache.get(next_node, [])
-                    self.agent.update(state, next_node, reward, next_state, next_actions)
-                    
-                    # Reduced frequency of experience replay for better performance
-                    if episode % 5 == 0 and steps_to_target % 20 == 0:
-                        self.agent.experience_replay(batch_size=32)
-                    
-                    # Move to next node
+
+                    # Update Q-values
+                    next_state = self._get_state(next_node)
+                    next_valid_actions = [n for n in neighbor_cache.get(next_node, [])
+                                        if n not in visited or steps_to_target > 50]
+                    self.agent.update(state, next_node, reward, next_state, next_valid_actions)
+
+                    # Move to next state
                     current = next_node
-                    visited.add(current)
                     path.append(current)
+                    visited.add(current)
                     total_reward += reward
                     steps_to_target += 1
-                
-                # If couldn't reach this waypoint, break the loop
+
+                # If we couldn't reach this waypoint, break the segment loop
                 if current != target:
                     break
-            
-            # Record successful paths
-            if path[-1] == end_node:
-                successful_paths.append((path, total_reward))
+
+            # Episode statistics and reporting
+            episode_success = (current == end_node)
+
+            # Only consider paths that reached the destination
+            if episode_success:
                 success_streak += 1
-                
-                # Check if this is a better path
+                successful_paths.append((path.copy(), total_reward))
+
+                # Update best path if this is better
                 if total_reward > best_reward:
                     best_reward = total_reward
-                    best_path = path
-                    print(f"Episode {episode}: New best path found with {len(path)} nodes and reward {total_reward:.1f}")
-                    
-                    # Reset stagnation counter when a better path is found
+                    best_path = path.copy()
                     stagnation_count = 0
-                
-                # Consider optimal path - if we have a path very close to shortest length
-                if len(path) <= shortest_length * 1.2:
-                    print(f"Found near-optimal path - length is only {len(path) / shortest_length:.2f}x shortest!")
-                    
-                    # If we have multiple good paths and they're close to optimal, we can finish early
-                    if len(successful_paths) >= 3 and success_streak >= 3:
-                        print(f"Early stopping - found multiple near-optimal paths")
-                        break
+                    print(f"Episode {episode+1}: New best path found! Length: {len(best_path)}, Reward: {best_reward:.1f}")
+                else:
+                    stagnation_count += 1
             else:
                 success_streak = 0
-                
-                # Track progress for early stopping
-                if path:
-                    last_node = path[-1]
-                    if last_node in distance_to_end:
-                        remaining = distance_to_end[last_node]
-                        initial = distance_to_end[start_node]
-                        progress = max(0, (initial - remaining) / initial * 100)
-                        
-                        if progress > best_progress:
-                            best_progress = progress
-                            stagnation_count = 0
-                        else:
-                            stagnation_count += 1
-            
-            # Performance monitoring and early stopping
+
+            # Calculate progress percentage
+            if waypoints and current in distance_to_end and end_node in distance_to_end:
+                max_distance = distance_to_end[start_node] if start_node in distance_to_end else 1000
+                current_distance = distance_to_end[current]
+                progress = (max_distance - current_distance) / max_distance * 100
+                best_progress = max(best_progress, progress)
+
+            # Progress reporting
             current_time = time.time()
-            if current_time - last_report_time > 30:  # Report every 30 seconds
+            if episode_success or (current_time - last_report_time > 5.0) or episode == 0 or episode == adjusted_max_episodes-1:
                 elapsed = current_time - start_time
-                success_rate = len(successful_paths) / (episode + 1)
-                print(f"Episode {episode}/{adjusted_max_episodes}: Success rate: {success_rate:.3f}, Time elapsed: {elapsed:.1f}s")
-                
-                # Early stopping if we've been running a long time with no improvement
-                if elapsed > 300 and stagnation_count > 200:  # 5 minutes and 200 episodes without progress
-                    print(f"Stopping due to lack of progress after {elapsed:.1f} seconds")
-                    break
-                    
+                success_rate = len(successful_paths) / (episode + 1) * 100
+                print(f"Episode {episode+1}/{adjusted_max_episodes}: " +
+                      f"Success: {'Yes' if episode_success else 'No'}, " +
+                      f"Best progress: {best_progress:.1f}%, " +
+                      f"Success rate: {success_rate:.1f}%, " +
+                      f"Elapsed: {elapsed:.1f}s")
                 last_report_time = current_time
-            
-            # Adaptive exploration rate
-            # - Keep high exploration rate initially
-            # - Reduce faster as we find successful paths
-            if success_streak > 0:
-                # Reduce faster when we have successful paths
-                self.agent.epsilon = max(0.1, self.agent.epsilon * 0.995)
-            else:
-                # Reduce slowly otherwise
-                self.agent.epsilon = max(0.2, self.agent.epsilon * 0.999)
-            
-            # Early stopping criteria
+
+            # Early stopping conditions
             if episode >= min_episodes:
-                success_rate = len(successful_paths) / (episode + 1)
-                
-                # Stop if we have enough successful paths
-                if success_rate >= success_threshold and len(successful_paths) >= 5:
-                    print(f"Early stopping at episode {episode}: success rate {success_rate:.2f}")
+                # Stop if we have a good success rate and a reasonable number of samples
+                if (len(successful_paths) / (episode + 1)) >= success_threshold and len(successful_paths) >= 10:
+                    print(f"Early stopping at episode {episode+1}: Success threshold reached")
                     break
-                
-                # Stop if we have an excellent path and we're getting diminishing returns
-                if best_path and len(best_path) < shortest_length * 1.5 and stagnation_count > 100:
-                    print(f"Early stopping at episode {episode}: found good path and stagnating")
+
+                # Stop if we're not making progress after enough episodes
+                if stagnation_count > min(1000, adjusted_max_episodes // 5) and len(successful_paths) > 0:
+                    print(f"Early stopping at episode {episode+1}: Stagnation detected")
                     break
-        
-        # Report final statistics
-        elapsed = time.time() - start_time
-        success_rate = len(successful_paths) / (adjusted_max_episodes if episode == adjusted_max_episodes-1 else episode+1)
-        print(f"Training completed: {len(successful_paths)} successful paths out of {episode+1} episodes ({success_rate:.2f})")
-        print(f"Total time: {elapsed:.1f} seconds")
-        
-        # Restore original epsilon
+
+                # Stop if we've had a consistent streak of successes
+                if success_streak >= 20:
+                    print(f"Early stopping at episode {episode+1}: Consistent success streak")
+                    break
+
+            # Gradually reduce exploration as training progresses
+            if episode % 100 == 0 and episode > 0:
+                self.agent.epsilon = max(0.1, self.agent.epsilon * 0.95)
+
+        # Restore original exploration rate
         self.agent.epsilon = original_epsilon
-        
-        # Return best path or None
+
+        # Return best route or None if no successful path was found
         if best_path:
-            print(f"Best path has {len(best_path)} nodes and reward {best_reward:.1f}")
             return self._create_route_result(best_path)
         elif successful_paths:
-            best_path = max(successful_paths, key=lambda x: x[1])[0]
-            print(f"Returning best path with {len(best_path)} nodes")
+            # Fallback to best successful path if best_path wasn't set
+            best_path, _ = max(successful_paths, key=lambda x: x[1])
             return self._create_route_result(best_path)
         else:
             print("No successful path found")

@@ -1,14 +1,18 @@
+//routemap.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Loader } from 'lucide-react';
 
-const RouteMap = ({ routes }) => {
+const RouteMap = ({ routes = []}) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [mapData, setMapData] = useState([]);
   const [progress, setProgress] = useState(0);
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
-
+  const abortControllersRef = useRef([]); // Store AbortControllers for cleanup
+  useEffect(() => {
+    console.log("RouteMap component received routes:", routes);
+  }, [routes]);
   // Initialize the map
   useEffect(() => {
     if (!mapRef.current) return;
@@ -25,6 +29,15 @@ const RouteMap = ({ routes }) => {
     
     // Clean up on unmount
     return () => {
+      // Cancel any pending requests
+      abortControllersRef.current.forEach(controller => {
+        try {
+          controller.abort();
+        } catch (err) {
+          console.log('Error aborting request:', err);
+        }
+      });
+      
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -41,6 +54,16 @@ const RouteMap = ({ routes }) => {
       setError(null);
       setProgress(0);
       
+      // Cancel any previous pending requests
+      abortControllersRef.current.forEach(controller => {
+        try {
+          controller.abort();
+        } catch (err) {
+          console.log('Error aborting request:', err);
+        }
+      });
+      abortControllersRef.current = [];
+      
       try {
         // Process routes with detailed path information
         const routesWithPaths = await Promise.all(
@@ -49,20 +72,30 @@ const RouteMap = ({ routes }) => {
             const totalRoutes = routes.length;
             const baseProgress = index / totalRoutes;
             
-            // Extract path segments if available
-            const pathSegments = route.path ? route.path.split('→').map(s => s.trim()) : [];
+            // Validate and clean path segments if available
+            const pathSegments = route.path 
+              ? route.path.split('→')
+                .map(s => s.trim())
+                .filter(s => isValidStreetName(s)) // Filter out invalid street names
+              : [];
             
             // Geocode start and end points as anchors
             const startPoint = await geocodeLocation(`${route.start}, Accra, Ghana`);
             setProgress(baseProgress + 0.1 / totalRoutes);
             
-            const endPoint = await geocodeLocation(`${route.end}, Accra, Ghana`);
+            // Get the end destination from streets array if available, otherwise use route.end
+            const endDestination = route.streets && route.streets.length > 0
+              ? route.streets[route.streets.length - 1]
+              : route.end;
+            
+            const endPoint = await geocodeLocation(`${endDestination}, Accra, Ghana`);
             setProgress(baseProgress + 0.2 / totalRoutes);
             
             // If we have path segments, geocode each street in the path
             let streetPoints = [];
             if (pathSegments.length > 0) {
-              streetPoints = await Promise.all(
+              // Use Promise.allSettled instead of Promise.all to handle failures better
+              const streetPointResults = await Promise.allSettled(
                 pathSegments.map(async (street, i) => {
                   // Update progress for each street
                   const streetProgress = baseProgress + 0.2 + ((i + 1) / pathSegments.length * 0.7);
@@ -76,17 +109,31 @@ const RouteMap = ({ routes }) => {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                   }
                   
-                  return result;
+                  return { street, result };
                 })
               );
+              
+              // Process the results, handling both fulfilled and rejected promises
+              streetPoints = streetPointResults.map((result, i) => {
+                if (result.status === 'fulfilled' && result.value.result) {
+                  return result.value.result;
+                } else {
+                  console.warn(`Failed to geocode street: ${pathSegments[i]}`, 
+                    result.status === 'rejected' ? result.reason : 'No result');
+                  // Return synthetic data for failed geocoding
+                  return createSyntheticStreetData(pathSegments[i], i, startPoint, endPoint);
+                }
+              });
             }
             
             return {
               ...route,
-              startPoint: startPoint && startPoint.length > 0 ? startPoint[0] : null,
-              endPoint: endPoint && endPoint.length > 0 ? endPoint[0] : null,
+              startPoint: startPoint && startPoint.length > 0 ? startPoint[0] : createDefaultPoint(0),
+              endPoint: endPoint && endPoint.length > 0 ? endPoint[0] : createDefaultPoint(1),
               pathSegments,
-              streetPoints
+              streetPoints,
+              // Store the true end destination for later use
+              endDestination: endDestination
             };
           })
         );
@@ -123,6 +170,78 @@ const RouteMap = ({ routes }) => {
     
     geocodeAndDisplayRoutes();
   }, [routes]);
+
+  // Validate street name to filter out IDs or invalid names
+  const isValidStreetName = (name) => {
+    if (!name) return false;
+    
+    // Filter out names that look like internal IDs
+    if (/^Street_\d+$/.test(name)) return false;
+    if (/^\d{5,}$/.test(name)) return false;
+    
+    // Filter out very short or excessively long names
+    if (name.length < 2 || name.length > 100) return false;
+    
+    return true;
+  };
+  
+  // Create a default synthetic point based on index (for start or end)
+  const createDefaultPoint = (index) => {
+    // Base coordinates in Accra
+    const baseLatitude = 5.6037;
+    const baseLongitude = -0.1870;
+    
+    // Offset based on index
+    const latOffset = index * 0.005;
+    const lngOffset = index * 0.005;
+    
+    return [baseLatitude + latOffset, baseLongitude + lngOffset];
+  };
+  
+  // Create synthetic street data when geocoding fails
+  const createSyntheticStreetData = (streetName, index, startPoint, endPoint) => {
+    // Create a hash based on street name for consistent coordinates
+    const hash = streetName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const latOffset = (hash % 100) / 10000;
+    const lngOffset = ((hash * 2) % 100) / 10000;
+    
+    // If we have both start and end points, create street between them
+    if (startPoint && startPoint.length > 0 && endPoint && endPoint.length > 0) {
+      // Figure out where this street should lie between start and end
+      const ratio = (index + 1) / (startPoint.length + 1);
+      
+      // Interpolate between start and end points
+      const midLat = startPoint[0][0] + (endPoint[0][0] - startPoint[0][0]) * ratio;
+      const midLng = startPoint[0][1] + (endPoint[0][1] - startPoint[0][1]) * ratio;
+      
+      // Create a synthetic street with slight variation to look natural
+      const streetPoints = [
+        [midLat - 0.001 + latOffset, midLng - 0.001 + lngOffset],
+        [midLat + latOffset, midLng + lngOffset],
+        [midLat + 0.001 + latOffset, midLng + 0.001 + lngOffset]
+      ];
+      
+      return { 
+        name: streetName, 
+        points: streetPoints,
+        isSynthetic: true
+      };
+    }
+    
+    // Fallback if no start/end coordinates
+    const basePoint = [5.6037 + (index * 0.001) + latOffset, -0.1870 + (index * 0.001) + lngOffset];
+    const streetPoints = [
+      [basePoint[0] - 0.001, basePoint[1] - 0.001],
+      basePoint,
+      [basePoint[0] + 0.001, basePoint[1] + 0.001]
+    ];
+    
+    return { 
+      name: streetName, 
+      points: streetPoints,
+      isSynthetic: true
+    };
+  };
 
   // Build a connected route from path segments
   const buildRouteFromPath = async (pathSegments, streetPoints, startPoint, endPoint) => {
@@ -296,7 +415,7 @@ const RouteMap = ({ routes }) => {
     return deg * (Math.PI/180);
   };
 
-  // Geocode a location using OpenStreetMap's Nominatim API
+  // Geocode a location using OpenStreetMap's Nominatim API with improved error handling
   const geocodeLocation = async (location) => {
     try {
       // Check cache first
@@ -313,11 +432,29 @@ const RouteMap = ({ routes }) => {
       const encodedLocation = encodeURIComponent(location);
       const url = `https://nominatim.openstreetmap.org/search?q=${encodedLocation}&format=json&limit=1`;
       
+      // Create an AbortController for this request
+      const controller = new AbortController();
+      abortControllersRef.current.push(controller);
+      
+      // Set a timeout to abort the request if it takes too long
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(url, {
         headers: {
           'User-Agent': 'RouteMapWebApp/1.0' // Required by Nominatim usage policy
-        }
+        },
+        signal: controller.signal,
+        // Add timeout
+        timeout: 5000
       });
+      
+      clearTimeout(timeoutId);
+      
+      // Remove this controller from the list
+      const index = abortControllersRef.current.indexOf(controller);
+      if (index > -1) {
+        abortControllersRef.current.splice(index, 1);
+      }
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -340,12 +477,24 @@ const RouteMap = ({ routes }) => {
       return result;
     } catch (error) {
       console.error(`Error geocoding "${location}":`, error);
+      
+      // If this is an abort error, don't report it as a failure
+      if (error.name === 'AbortError') {
+        console.log(`Request for "${location}" was aborted`);
+      }
+      
       return null;
     }
   };
 
-  // Improved geocoding for a single street with specific context
+  // Improved geocoding for a single street with specific context and better error handling
   const geocodeSingleStreet = async (streetName, locationContext) => {
+    // Validate the street name first
+    if (!isValidStreetName(streetName)) {
+      console.warn(`Invalid street name skipped: ${streetName}`);
+      return createSyntheticStreetData(streetName, 0, null, null);
+    }
+    
     try {
       // Handle known streets in Accra with hardcoded coordinates
       const knownStreets = {
@@ -398,6 +547,13 @@ const RouteMap = ({ routes }) => {
         `${streetName} Avenue, ${locationContext}`
       ];
       
+      // Create an AbortController for this request
+      const controller = new AbortController();
+      abortControllersRef.current.push(controller);
+      
+      // Set a timeout to abort the request if it takes too long
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       // Try each query format until we get a result
       for (const query of queries) {
         const encodedQuery = encodeURIComponent(query);
@@ -405,60 +561,87 @@ const RouteMap = ({ routes }) => {
         // Build Nominatim API URL with polygon_geojson to get street shape
         const url = `https://nominatim.openstreetmap.org/search?q=${encodedQuery}&format=json&polygon_geojson=1&limit=1`;
         
-        const response = await fetch(url, {
-          headers: {
-            'User-Agent': 'RouteMapWebApp/1.0'
-          }
-        });
-        
-        if (!response.ok) {
-          continue;
-        }
-        
-        const data = await response.json();
-        
-        if (data && data.length > 0) {
-          // Get the location and extract geometry
-          const location = data[0];
-          let streetShape = [];
+        try {
+          const response = await fetch(url, {
+            headers: {
+              'User-Agent': 'RouteMapWebApp/1.0'
+            },
+            signal: controller.signal
+          });
           
-          // Prefer LineString for more accurate routing
-          if (location.geojson && location.geojson.type === 'LineString') {
-            streetShape = location.geojson.coordinates.map(coord => [coord[1], coord[0]]);
-          } else if (location.geojson && location.geojson.type === 'MultiLineString') {
-            // For MultiLineString, concatenate all segments
-            streetShape = location.geojson.coordinates.flatMap(line => 
-              line.map(coord => [coord[1], coord[0]])
-            );
-          } else {
-            // Fallback to a line centered on the point if no LineString
-            const point = [parseFloat(location.lat), parseFloat(location.lon)];
-            streetShape = [
-              [point[0] - 0.0005, point[1] - 0.0005],
-              point,
-              [point[0] + 0.0005, point[1] + 0.0005]
-            ];
+          if (!response.ok) {
+            continue;
           }
           
-          const result = { 
-            name: streetName, 
-            points: streetShape,
-            display_name: location.display_name,
-            osm_type: location.osm_type,
-            osm_id: location.osm_id
-          };
+          const data = await response.json();
           
-          // Cache the result
-          localStorage.setItem(cacheKey, JSON.stringify(result));
+          if (data && data.length > 0) {
+            // Get the location and extract geometry
+            const location = data[0];
+            let streetShape = [];
+            
+            // Prefer LineString for more accurate routing
+            if (location.geojson && location.geojson.type === 'LineString') {
+              streetShape = location.geojson.coordinates.map(coord => [coord[1], coord[0]]);
+            } else if (location.geojson && location.geojson.type === 'MultiLineString') {
+              // For MultiLineString, concatenate all segments
+              streetShape = location.geojson.coordinates.flatMap(line => 
+                line.map(coord => [coord[1], coord[0]])
+              );
+            } else {
+              // Fallback to a line centered on the point if no LineString
+              const point = [parseFloat(location.lat), parseFloat(location.lon)];
+              streetShape = [
+                [point[0] - 0.0005, point[1] - 0.0005],
+                point,
+                [point[0] + 0.0005, point[1] + 0.0005]
+              ];
+            }
+            
+            clearTimeout(timeoutId);
+            
+            // Remove this controller from the list
+            const index = abortControllersRef.current.indexOf(controller);
+            if (index > -1) {
+              abortControllersRef.current.splice(index, 1);
+            }
+            
+            const result = { 
+              name: streetName, 
+              points: streetShape,
+              display_name: location.display_name,
+              osm_type: location.osm_type,
+              osm_id: location.osm_id
+            };
+            
+            // Cache the result
+            localStorage.setItem(cacheKey, JSON.stringify(result));
+            
+            return result;
+          }
           
-          return result;
+          // Respect Nominatim usage policy
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          // Check if this was an abort error
+          if (error.name === 'AbortError') {
+            console.log(`Request for "${query}" was aborted due to timeout`);
+            break; // Stop trying more queries if we got an abort
+          }
+          
+          console.error(`Error trying query "${query}":`, error);
+          // Continue to next query format
         }
-        
-        // Respect Nominatim usage policy
-        await new Promise(resolve => setTimeout(resolve, 1000));
       }
       
-      // If no results from Nominatim, use synthetic data for the street
+      // Clear the timeout and remove the controller
+      clearTimeout(timeoutId);
+      const index = abortControllersRef.current.indexOf(controller);
+      if (index > -1) {
+        abortControllersRef.current.splice(index, 1);
+      }
+      
+      // If no results from API, use synthetic data for the street
       console.warn(`Street not found: ${streetName}. Using synthetic data.`);
       
       // Create synthetic coordinate based on street name hash for consistency
@@ -481,17 +664,34 @@ const RouteMap = ({ routes }) => {
       };
     } catch (error) {
       console.error(`Error geocoding "${streetName}":`, error);
-      return { name: streetName, points: [], error: error.message };
+      return createSyntheticStreetData(streetName, 0, null, null);
     }
   };
 
-  // Get a route between two points using OSRM if available
+  // Get a route between two points using OSRM if available, with better error handling
   const getRouteBetweenPoints = async (fromPoint, toPoint) => {
     try {
+      // Create an AbortController for this request
+      const controller = new AbortController();
+      abortControllersRef.current.push(controller);
+      
+      // Set a timeout to abort the request if it takes too long
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
       // Try using OSRM for better routing
       const url = `https://router.project-osrm.org/route/v1/driving/${fromPoint[1]},${fromPoint[0]};${toPoint[1]},${toPoint[0]}?overview=full&geometries=geojson`;
       
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // Remove this controller from the list
+      const index = abortControllersRef.current.indexOf(controller);
+      if (index > -1) {
+        abortControllersRef.current.splice(index, 1);
+      }
       
       if (response.ok) {
         const data = await response.json();
@@ -509,6 +709,12 @@ const RouteMap = ({ routes }) => {
       return [fromPoint, toPoint];
     } catch (error) {
       console.error("Error getting route from OSRM:", error);
+      
+      // If this is an abort error, don't worry too much
+      if (error.name === 'AbortError') {
+        console.log('OSRM request was aborted due to timeout');
+      }
+      
       // Fallback to direct line
       return [fromPoint, toPoint];
     }
@@ -549,10 +755,14 @@ const RouteMap = ({ routes }) => {
           dashArray: segment.isConnector ? "5, 5" : null // Connectors are dashed
         }).addTo(mapInstanceRef.current);
         
+        
         // Add popup with segment information
         routeLine.bindPopup(`<strong>${segment.name}</strong>`);
         mapInstanceRef.current.routeLayers.push(routeLine);
       });
+      
+      // Use the endDestination we stored earlier for display
+      const endDestination = route.endDestination || route.end;
       
       // Add start marker
       if (route.startPoint) {
@@ -581,10 +791,91 @@ const RouteMap = ({ routes }) => {
           })
         }).addTo(mapInstanceRef.current);
         
-        endMarker.bindPopup(`<strong>End: ${route.end}</strong>`);
+        // Use the corrected end destination
+        endMarker.bindPopup(`<strong>End: ${endDestination}</strong>`);
         mapInstanceRef.current.routeLayers.push(endMarker);
         allPoints.push(route.endPoint);
       }
+      
+ // For multi-stop routes, add stop markers
+if (route.destinations && route.destinations.length > 0) {
+  // Mark this as a multi-stop route
+  route.isMultiStop = true;
+  
+  // Process each destination except the final one (which is already marked as the end)
+  route.destinations.forEach((destination, idx) => {
+    // Skip the last destination as it's already marked as the end
+    if (idx === route.destinations.length - 1 && destination === endDestination) return;
+    
+    // Find this destination in the streets array
+    const streetIndex = route.streets.indexOf(destination);
+    let point = null;
+    
+    if (streetIndex >= 0) {
+      // If we found the street in the streets array, get its points
+      // We need to find the corresponding streetPoints
+      if (route.streetPoints && route.streetPoints[streetIndex] && 
+          route.streetPoints[streetIndex].points && route.streetPoints[streetIndex].points.length > 0) {
+        // Use the first point of the street for the marker
+        point = route.streetPoints[streetIndex].points[0];
+      }
+    } else {
+      // If the destination is not found in streets array, search in pathSegments
+      const pathIndex = route.pathSegments ? route.pathSegments.indexOf(destination) : -1;
+      if (pathIndex >= 0 && route.streetPoints && route.streetPoints[pathIndex]) {
+        point = route.streetPoints[pathIndex].points[0];
+      }
+    }
+    
+    // If we still don't have a point, search through all street points for a matching name
+    if (!point && route.streetPoints) {
+      const matchingStreet = route.streetPoints.find(sp => sp.name === destination);
+      if (matchingStreet && matchingStreet.points && matchingStreet.points.length > 0) {
+        point = matchingStreet.points[0];
+      }
+    }
+    
+    // If we have a point, create the marker
+    if (point) {
+      const stopMarker = window.L.marker(point, {
+        icon: window.L.divIcon({
+          className: 'stop-marker',
+          html: `<div style="background-color: ${routeColor}; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">${idx+1}</div>`,
+          iconSize: [18, 18],
+          iconAnchor: [9, 9]
+        })
+      }).addTo(mapInstanceRef.current);
+      
+      stopMarker.bindPopup(`<strong>Stop ${idx+1}: ${destination}</strong>`);
+      mapInstanceRef.current.routeLayers.push(stopMarker);
+    } else {
+      // If we couldn't find the point, we need to geocode the destination
+      // This is a fallback method
+      const geocodeAndAddMarker = async () => {
+        try {
+          const geocodedPoint = await geocodeLocation(`${destination}, Accra, Ghana`);
+          if (geocodedPoint && geocodedPoint.length > 0) {
+            const stopMarker = window.L.marker(geocodedPoint[0], {
+              icon: window.L.divIcon({
+                className: 'stop-marker',
+                html: `<div style="background-color: ${routeColor}; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">${idx+1}</div>`,
+                iconSize: [18, 18],
+                iconAnchor: [9, 9]
+              })
+            }).addTo(mapInstanceRef.current);
+            
+            stopMarker.bindPopup(`<strong>Stop ${idx+1}: ${destination}</strong>`);
+            mapInstanceRef.current.routeLayers.push(stopMarker);
+          }
+        } catch (error) {
+          console.error(`Failed to geocode waypoint: ${destination}`, error);
+        }
+      };
+      
+      geocodeAndAddMarker();
+    }
+  });
+}
       
       // Add waypoint markers at each street junction
       if (route.pathSegments && route.pathSegments.length > 0) {
@@ -638,6 +929,8 @@ const RouteMap = ({ routes }) => {
       mapInstanceRef.current.fitBounds(window.L.latLngBounds(allPoints).pad(0.1));
     }
   };
+    
+ 
 
   // Get a color for each route
   const getRouteColor = (index) => {
@@ -672,8 +965,8 @@ const RouteMap = ({ routes }) => {
               <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
               <p className="text-sm text-gray-700">Processing routes...</p>
               <div className="w-64 h-2 bg-gray-200 rounded-full mt-2">
-                <div 
-                  className="h-full bg-blue-600 rounded-full" 
+                <div
+                  className="h-full bg-blue-600 rounded-full"
                   style={{ width: `${progress * 100}%` }}
                 ></div>
               </div>
@@ -688,26 +981,58 @@ const RouteMap = ({ routes }) => {
       {!loading && mapData.length > 0 && (
         <div className="mt-4">
           <h5 className="font-medium mb-2">Routes Legend</h5>
-          <div className="grid grid-cols-2 gap-4">
-            {mapData.map((route, index) => (
-              <div key={index} className="flex items-center">
-                <div 
-                  className="w-4 h-4 rounded mr-2" 
-                  style={{ backgroundColor: getRouteColor(index) }}
-                ></div>
-                <span className="text-sm">
-                  {route.start} to {route.end}
-                  {route.pathSegments && route.pathSegments.length > 0 && (
-                    <span className="text-xs text-gray-500 ml-1">
-                      via {route.pathSegments.join(' → ')}
-                    </span>
-                  )}
-                </span>
-              </div>
-            ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {mapData.map((route, index) => {
+              // For the end, use the last item in streets array if available
+              const endStreet = route.streets && route.streets.length > 0 
+                ? route.streets[route.streets.length - 1] 
+                : (route.destinations && route.destinations.length > 0 
+                  ? route.destinations[route.destinations.length - 1] 
+                  : route.end);
+              
+              // Calculate the number of streets to show in the shortened path (at most 3)
+              const maxStreets = 3;
+              let pathDisplay = '';
+              
+              if (route.streets && route.streets.length > 0) {
+                if (route.streets.length <= maxStreets + 2) {
+                  // If we have few streets, show all of them except start/end
+                  const middleStreets = route.streets.slice(1, -1);
+                  pathDisplay = middleStreets.length > 0 ? `via ${middleStreets.join(' → ')}` : '';
+                } else {
+                  // If we have many streets, show the first one, ellipsis, and the last one before the end
+                  pathDisplay = `via ${route.streets[1]} → ... → ${route.streets[route.streets.length - 2]}`;
+                }
+              }
+              
+              return (
+                <div key={index} className="flex items-center">
+                  <div
+                    className="w-4 h-4 rounded-full mr-2 flex-shrink-0"
+                    style={{ backgroundColor: getRouteColor(index) }}
+                  ></div>
+                  <div className="text-sm overflow-hidden">
+                    <span className="font-medium">{route.start} to {endStreet}</span>
+                    {pathDisplay && (
+                      <span className="text-xs text-gray-500 ml-1 block md:inline">
+                        {pathDisplay}
+                      </span>
+                    )}
+                    {route.isMultiStop && route.destinations && route.destinations.length > 1 && (
+                      <span className="text-xs text-blue-500 ml-1 block">
+                        Multi-stop route ({route.destinations.length} stops)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
+      
+     
+    
     </div>
   );
 };

@@ -9,6 +9,11 @@ import re
 from models import (TransportNetwork, ImprovedRLAgent, 
                     ImprovedRoutePlanner, LogisticsOptimizer, TrafficState)
 
+# Set proper encoding for stdout/stderr to handle Unicode characters
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 print("Python script started", file=sys.stderr)
 print(f"Current working directory: {os.getcwd()}", file=sys.stderr)
 print(f"Args received: {sys.argv}", file=sys.stderr)
@@ -42,8 +47,6 @@ except Exception as e:
     print(f"Error loading components: {str(e)}", file=sys.stderr)
     sys.exit(1)
 
-# Rest of your code remains the same
-
 # Data classes for logistics
 class LogisticsDestination:
     def __init__(self, dest_street, demand):
@@ -59,76 +62,207 @@ def serialize_traffic_distribution(traffic_dist):
     """Convert traffic distribution to serializable format."""
     return {str(key): value for key, value in traffic_dist.items()}
 
-
-def find_route(start, end):
-    """Find a route between two streets with detailed diagnostics."""
+def safe_json_dumps(obj):
+    """Safely encode JSON with proper handling of Unicode characters."""
     try:
-        
-        network_streets = list(network.street_to_nodes.keys())
-        # Check if the input streets exist in network (with detailed diagnostics)
-        print(f"\nChecking if '{start}' exists in network:", file=sys.stderr)
-        exact_match = start in network.street_to_nodes
-        print(f"  Exact match: {exact_match}", file=sys.stderr)
-        
-        print(f"\nChecking if '{end}' exists in network:", file=sys.stderr)
-        exact_match_end = end in network.street_to_nodes
-        print(f"  Exact match: {exact_match_end}", file=sys.stderr)
-        
-        # Attempt to find route using the planner's own lookup logic
-        print(f"\nAttempting to find route from '{start}' to '{end}'", file=sys.stderr)
-        
-        # IMPORTANT CHANGE: Use the raw street names and let the planner handle the lookups
-        # This will use the same lookup logic as in the ImprovedRoutePlanner class
-        try:
-            route = planner.find_route(start, end)
-            result = {
-                "distance": route.total_distance,
-                "time": route.total_time,
-                "streets": route.street_path,
-                "traffic": serialize_traffic_distribution(route.traffic_distribution)
-            }
-            print("Route Result:", file=sys.stderr)
-            print(json.dumps(result), file=sys.stderr)
-            return result
-        except ValueError as e:
-            # Handle the specific error from planner.find_route
-            error_message = str(e)
-            print(f"Planner reported error: {error_message}", file=sys.stderr)
-            
-            # Determine which street wasn't found
-            search_term = start
-            if "End street" in error_message:
-                search_term = end
-            
-            # Find similar streets for helpful error message
-            similar_streets = []
-            for network_street in network_streets:
-                if search_term.lower() in network_street.lower() or network_street.lower() in search_term.lower():
-                    similar_streets.append(network_street)
-                    if len(similar_streets) >= 5:
-                        break
-            
-            error_result = {
-                "error": error_message,
-                "similar_streets": similar_streets
-            }
-            print(json.dumps(error_result), file=sys.stderr)
-            return error_result
-            
-    except Exception as e:
-        error_result = {
-            "error": f"Unexpected error: {str(e)}",
-            "traceback": traceback.format_exc()
-        }
-        print(json.dumps(error_result))
-        return error_result
+        return json.dumps(obj, ensure_ascii=False)
+    except UnicodeEncodeError:
+        # Fallback to ASCII with escaping if needed
+        return json.dumps(obj, ensure_ascii=True)
 
+def find_route(data_file):
+    """Find a route between two streets or multiple destinations from one source."""
+    try:
+        # Load data from the JSON file
+        with open(data_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        print(f"Loaded data file content: {safe_json_dumps(data)}", file=sys.stderr)
+        
+        # Check for different data formats
+        if 'routes' in data:
+            # Handle grouped routes format (from first error log)
+            routes_data = data.get('routes', [])
+            if not routes_data:
+                return {"error": "No routes found in data file"}
+            
+            # Group routes by source
+            source_groups = {}
+            for route in routes_data:
+                source = route.get('source')
+                destination = route.get('destination')
+                
+                if not source or not destination:
+                    return {"error": f"Missing source or destination in route: {route}"}
+                
+                if source not in source_groups:
+                    source_groups[source] = []
+                source_groups[source].append(destination)
+            
+            # Process each source group
+            results = []
+            for source, destinations in source_groups.items():
+                print(f"Processing source '{source}' with destinations: {destinations}", file=sys.stderr)
+                
+                try:
+                    # Call find_multi_stop_route which returns a single RouteResult
+                    route = planner.find_multi_stop_route(source, destinations)
+                    
+                    # Clean street path of problematic Unicode characters
+                    clean_street_path = [str(s).replace('\u2192', '->') for s in route.street_path]
+                    
+                    source_result = {
+                        "source": source,
+                        "destinations": destinations,
+                        "distance": route.total_distance,
+                        "time": route.total_time,
+                        "streets": clean_street_path,
+                        "traffic": serialize_traffic_distribution(route.traffic_distribution)
+                    }
+                    
+                    results.append(source_result)
+                    
+                except ValueError as e:
+                    # Handle errors for this source group
+                    error_msg = str(e)
+                    # Replace problematic Unicode characters
+                    error_msg = error_msg.replace('\u2192', '->')
+                    
+                    results.append({
+                        "source": source,
+                        "error": error_msg,
+                        "destinations": destinations
+                    })
+                except UnicodeEncodeError as e:
+                    results.append({
+                        "source": source,
+                        "error": "Unicode encoding error in route data",
+                        "destinations": destinations
+                    })
+            
+            return {"results": results}
+            
+        else:
+            # Handle original format (single source or multi-destination)
+            source = data.get('source')
+            if not source:
+                return {"error": "Missing source in data file"}
+            
+            is_multi_destination = data.get('isMultiDestination', False)
+            destinations = data.get('destinations', [])
+            
+            # If destinations array is present, treat as multi-destination
+            if destinations and len(destinations) > 0:
+                is_multi_destination = True
+            elif not is_multi_destination:
+                # Single destination case
+                destination = data.get('destination')
+                if not destination:
+                    return {"error": "Missing destination in data file"}
+                
+                destinations = [destination]
+            
+            # Check if the input streets exist in network
+            network_streets = list(network.street_to_nodes.keys())
+            print(f"\nChecking if '{source}' exists in network:", file=sys.stderr)
+            exact_match = source in network.street_to_nodes
+            print(f"  Exact match: {exact_match}", file=sys.stderr)
+            
+            try:
+                if is_multi_destination and len(destinations) > 1:
+                    print(f"\nProcessing multi-destination request from '{source}' to {len(destinations)} destinations", file=sys.stderr)
+                    
+                    # Call find_multi_stop_route which returns a single RouteResult
+                    route = planner.find_multi_stop_route(source, destinations)
+                    
+                    # Clean street path of problematic Unicode characters
+                    clean_street_path = [str(s).replace('\u2192', '->') for s in route.street_path]
+                    
+                    result = {
+                        "source": source,
+                        "destinations": destinations,
+                        "distance": route.total_distance,
+                        "time": route.total_time,
+                        "streets": clean_street_path,
+                        "traffic": serialize_traffic_distribution(route.traffic_distribution)
+                    }
+                else:
+                    print(f"\nProcessing single destination request from '{source}' to '{destinations[0]}'", file=sys.stderr)
+                    # Use the standard find_route method for single destination
+                    route = planner.find_route(source, destinations[0])
+                    
+                    # Clean street path of problematic Unicode characters
+                    clean_street_path = [str(s).replace('\u2192', '->') for s in route.street_path]
+                    
+                    result = {
+                        "source": source,
+                        "destination": destinations[0],
+                        "distance": route.total_distance,
+                        "time": route.total_time,
+                        "streets": clean_street_path,
+                        "traffic": serialize_traffic_distribution(route.traffic_distribution)
+                    }
+                
+                print("Route Result:", file=sys.stderr)
+                print(safe_json_dumps(result), file=sys.stderr)
+                return result
+                
+            except ValueError as e:
+                # Handle the specific error from planner methods
+                error_message = str(e)
+                # Replace problematic Unicode characters
+                error_message = error_message.replace('\u2192', '->')
+                
+                print(f"Planner reported error: {error_message}", file=sys.stderr)
+                
+                # Determine which street wasn't found for better error reporting
+                search_term = source
+                if "End street" in error_message:
+                    for dest in destinations:
+                        if dest in error_message:
+                            search_term = dest
+                            break
+                
+                # Find similar streets for helpful error message
+                similar_streets = []
+                for network_street in network_streets:
+                    if search_term.lower() in network_street.lower() or network_street.lower() in search_term.lower():
+                        similar_streets.append(network_street)
+                        if len(similar_streets) >= 5:
+                            break
+                
+                error_result = {
+                    "error": error_message,
+                    "similar_streets": similar_streets
+                }
+                print(safe_json_dumps(error_result), file=sys.stderr)
+                return error_result
+            
+            except UnicodeEncodeError as e:
+                error_result = {
+                    "error": "Unicode encoding error in route data",
+                    "details": str(e).replace('\u2192', '->')
+                }
+                print(safe_json_dumps(error_result), file=sys.stderr)
+                return error_result
+                
+    except Exception as e:
+        error_message = str(e)
+        # Replace problematic Unicode characters
+        error_message = error_message.replace('\u2192', '->')
+        
+        error_result = {
+            "error": f"Unexpected error: {error_message}",
+            "traceback": traceback.format_exc().replace('\u2192', '->')
+        }
+        print(safe_json_dumps(error_result), file=sys.stderr)
+        return error_result
 
 def optimize_transport(data_path):
     """Run the logistics optimization using the provided data."""
     try:
         print(f"Optimizing transport allocation from data: {data_path}", file=sys.stderr)
-        with open(data_path, 'r') as f:
+        with open(data_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
         print(f"Data loaded successfully: {len(data['sources'])} sources, {len(data['destinations'])} destinations", file=sys.stderr)
@@ -168,11 +302,10 @@ def optimize_transport(data_path):
             })
       
         result = {"allocations": allocation_results}
-        print(json.dumps(result),file=sys.stderr) 
+        print(safe_json_dumps(result), file=sys.stderr) 
         
         return result
             
-        
     except Exception as e:
         traceback_info = traceback.format_exc()
         print(f"Optimization error: {str(e)}", file=sys.stderr)
@@ -185,57 +318,36 @@ def optimize_transport(data_path):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Missing command argument"}), file=sys.stderr)
+        print(safe_json_dumps({"error": "Missing command argument"}))
         sys.exit(1)
     
     command = sys.argv[1]
     
     if command == "find_route":
-        # Check if arguments are passed directly or via file
-        if len(sys.argv) >= 4:
-            # Direct arguments mode
-            start = sys.argv[2]
-            end = sys.argv[3]
-            result = find_route(start, end)
-            print(json.dumps(result), file=sys.stderr)
-        elif len(sys.argv) == 3:
-            # File mode - read from JSON file
-            data_path = sys.argv[2]
-            try:
-                with open(data_path, 'r') as f:
-                    data = json.load(f)
-                    
-                start = data.get('source')
-                end = data.get('destination')
-                
-                if not start or not end:
-                    print(json.dumps({"error": "Missing source or destination in data file"}), file=sys.stderr)
-                    sys.exit(1)
-                    
-                result = find_route(start, end)
-                print(json.dumps(result), file=sys.stderr)
-            except Exception as e:
-                print(json.dumps({"error": f"Error reading data file: {str(e)}"}), file=sys.stderr)
-                sys.exit(1)
-        else:
-            print(json.dumps({"error": "Missing start/end streets or data file path"}), file=sys.stderr)
+        # Check if data file is provided
+        if len(sys.argv) < 3:
+            print(safe_json_dumps({"error": "Missing data file path"}))
             sys.exit(1)
+            
+        data_path = sys.argv[2]
+        result = find_route(data_path)
+        print(safe_json_dumps(result))
             
     elif command == "find_routes":
         # Process routes from a file with multiple pairs
         if len(sys.argv) < 3:
-            print(json.dumps({"error": "Missing data path argument"}), file=sys.stderr)
+            print(safe_json_dumps({"error": "Missing data path argument"}))
             sys.exit(1)
             
         data_path = sys.argv[2]
         try:
-            with open(data_path, 'r') as f:
+            with open(data_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 
             route_pairs = data.get('routePairs', [])
             
             if not route_pairs:
-                print(json.dumps({"error": "No route pairs found in data file"}), file=sys.stderr)
+                print(safe_json_dumps({"error": "No route pairs found in data file"}))
                 sys.exit(1)
                 
             results = []
@@ -253,42 +365,55 @@ if __name__ == "__main__":
                     })
                     continue
                     
-                result = find_route(source, destination)
-                
-                if "error" in result:
-                    errors.append({
-                        "source": source,
-                        "destination": destination,
-                        **result
-                    })
-                else:
+                try:
+                    route = planner.find_route(source, destination)
+                    # Clean street path of problematic Unicode characters
+                    clean_street_path = [str(s).replace('\u2192', '->') for s in route.street_path]
+                    
                     results.append({
                         "source": source,
                         "destination": destination,
-                        **result
+                        "distance": route.total_distance,
+                        "time": route.total_time,
+                        "streets": clean_street_path,
+                        "traffic": serialize_traffic_distribution(route.traffic_distribution)
+                    })
+                except ValueError as e:
+                    error_msg = str(e).replace('\u2192', '->')
+                    errors.append({
+                        "source": source,
+                        "destination": destination,
+                        "error": error_msg
+                    })
+                except UnicodeEncodeError:
+                    errors.append({
+                        "source": source,
+                        "destination": destination,
+                        "error": "Unicode encoding error in route data"
                     })
                     
-            print(json.dumps({
+            print(safe_json_dumps({
                 "routes": results,
                 "errors": errors,
                 "total": len(route_pairs),
                 "success": len(results),
                 "failed": len(errors)
-            }), file=sys.stderr)
+            }))
             
         except Exception as e:
-            print(json.dumps({"error": f"Error processing routes: {str(e)}"}), file=sys.stderr)
+            error_msg = str(e).replace('\u2192', '->')
+            print(safe_json_dumps({"error": f"Error processing routes: {error_msg}"}))
             sys.exit(1)
         
     elif command == "optimize":
         if len(sys.argv) < 3:
-            print(json.dumps({"error": "Missing data path argument"}), file=sys.stderr)
+            print(safe_json_dumps({"error": "Missing data path argument"}))
             sys.exit(1)
             
         data_path = sys.argv[2]
         result = optimize_transport(data_path)
-        print(json.dumps(result), file=sys.stderr)
+        print(safe_json_dumps(result))
         
     else:
-        print(json.dumps({"error": f"Unknown command: {command}"}), file=sys.stderr)
+        print(safe_json_dumps({"error": f"Unknown command: {command}"}))
         sys.exit(1)

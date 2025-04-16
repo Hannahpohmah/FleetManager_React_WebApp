@@ -1,18 +1,29 @@
+//route_result.jsx
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, MapPin, Clock, Navigation } from 'lucide-react';
-import RouteMap from './routemap'; // Import the new RouteMap component
+import { ArrowLeft, MapPin, Clock, Navigation, Flag, ChevronDown, ChevronUp, Car } from 'lucide-react';
+import RouteMap from './routemap'; // Import the RouteMap component
+import MapSection from './MapSection';
 
 const RouteResults = ({ setActiveTab, optimizationResults }) => {
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showMap, setShowMap] = useState(true);
+  const [expandedRoutes, setExpandedRoutes] = useState({});
   
   useEffect(() => {
     loadRouteData();
     // Add Leaflet CSS and JS
     loadLeaflet();
   }, [optimizationResults]);
+
+  // Toggle route expansion
+  const toggleRouteExpansion = (index) => {
+    setExpandedRoutes(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
+  };
 
   // Load Leaflet dynamically
   const loadLeaflet = () => {
@@ -30,7 +41,6 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
   };
 
   const loadRouteData = () => {
-    // ... [Your existing loadRouteData function remains unchanged]
     setLoading(true);
     setError(null);
     
@@ -57,10 +67,17 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
       
       console.log('Successfully extracted routes data:', routesData.length);
       
-      // Step 3: Normalize the routes data
+      // Step 3: Normalize the routes data with improved multi-destination support
       const normalizedRoutes = normalizeRoutesData(routesData);
       console.log('Normalized routes:', normalizedRoutes);
       setRoutes(normalizedRoutes);
+      
+      // Initialize expanded state for all routes
+      const initialExpandedState = {};
+      normalizedRoutes.forEach((_, index) => {
+        initialExpandedState[index] = index === 0; // Expand only first route by default
+      });
+      setExpandedRoutes(initialExpandedState);
     } catch (err) {
       console.error('Error processing route results:', err);
       setError('Failed to load route results: ' + err.message);
@@ -68,9 +85,6 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
       setLoading(false);
     }
   };
-
-  // [All your existing helper functions remain unchanged]
-  // findResultsData, extractRoutesData, hasRouteProperties, normalizeRoutesData, etc.
 
   const findResultsData = () => {
     console.log('Searching for route results data...');
@@ -130,7 +144,6 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
     return null;
   };
 
-  // Helper function to extract routes data from the results
   const extractRoutesData = (resultsData) => {
     console.log('Extracting routes from:', resultsData);
     
@@ -188,7 +201,6 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
     return null;
   };
 
-  // Helper function to check if an object has route-like properties
   const hasRouteProperties = (obj) => {
     if (!obj || typeof obj !== 'object') return false;
     
@@ -198,7 +210,7 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
     // Check for typical route properties
     const hasSourceDest = (
       (obj.source !== undefined || obj.start !== undefined || obj.origin !== undefined) &&
-      (obj.destination !== undefined || obj.end !== undefined || obj.dest !== undefined)
+      (obj.destination !== undefined || obj.destinations !== undefined || obj.end !== undefined || obj.dest !== undefined)
     );
     
     const hasRouteDetails = (
@@ -211,19 +223,46 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
     );
     
     return hasSourceDest || hasRouteDetails;
-  };
+  }; 
 
-  // Helper function to normalize routes data
   const normalizeRoutesData = (routesData) => {
     return routesData.map(route => {
-      // Create a standardized route object with more fallback options
+      // Get the source/start location
+      const start = getPropertyValue(route, ['start', 'source', 'origin', 'from']);
+      
+      // Handle multiple destinations
+      let destinations = [];
+      let isMultiStop = false;
+      
+      // Check for an array of destinations first
+      if (route.destinations && Array.isArray(route.destinations)) {
+        destinations = route.destinations;
+        // Only set as multi-stop if there are multiple destinations
+        isMultiStop = destinations.length > 1;
+      } else {
+        // Check for a single destination
+        const singleDestination = getPropertyValue(route, ['end', 'destination', 'dest', 'to']);
+        if (singleDestination) {
+          destinations = [singleDestination];
+          isMultiStop = false;
+        }
+      }
+      
+      // Get distance in meters and convert to kilometers
+      const distanceInMeters = getNumericValue(route, ['distance', 'dist', 'length']);
+      const distanceInKm = distanceInMeters / 1000;
+      
+      // Get time in seconds and keep as seconds (will be converted to minutes/hours in display function)
+      const timeInSeconds = getNumericValue(route, ['time', 'duration', 'travelTime']);
+      
+      // Create a standardized route object with support for multiple destinations
       const normalizedRoute = {
-        start: getPropertyValue(route, ['start', 'source', 'origin', 'from']),
-        end: getPropertyValue(route, ['end', 'destination', 'dest', 'to']),
-        distance: getNumericValue(route, ['distance', 'dist', 'length']),
-        time: getNumericValue(route, ['time', 'duration', 'travelTime']),
+        start,
+        destinations,
+        isMultiStop,
+        distance: distanceInKm,
+        time: timeInSeconds,
         streets: getArrayValue(route, ['streets', 'path', 'segments', 'route']),
-        traffic: route.traffic || route.trafficConditions || {},
         error: route.error || null
       };
       
@@ -250,8 +289,7 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
       return normalizedRoute;
     });
   };
-
-  // Helper function to get a property value from multiple possible keys
+  
   const getPropertyValue = (obj, keys) => {
     for (const key of keys) {
       if (obj[key] !== undefined) {
@@ -261,7 +299,6 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
     return '';
   };
 
-  // Helper function to get a numeric value from multiple possible keys
   const getNumericValue = (obj, keys) => {
     for (const key of keys) {
       if (obj[key] !== undefined) {
@@ -276,7 +313,6 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
     return 0;
   };
 
-  // Helper function to get an array value from multiple possible keys
   const getArrayValue = (obj, keys) => {
     for (const key of keys) {
       if (Array.isArray(obj[key])) {
@@ -298,41 +334,12 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
     return [];
   };
 
-  // Helper function to format traffic data display
-  const formatTrafficData = (traffic) => {
-    if (!traffic || Object.keys(traffic).length === 0) return [];
+  const formatTime = (seconds) => {
+    // Convert seconds to minutes for calculation
+    const minutes = seconds / 60;
     
-    return Object.entries(traffic).map(([state, percentage]) => {
-      // Handle different formats (decimal vs percentage)
-      const value = percentage > 1 ? percentage : percentage * 100;
-      
-      // Map traffic states to human-readable labels
-      let label = "Unknown";
-      switch (state) {
-        case "0":
-          label = "Normal Traffic";
-          break;
-        case "1":
-          label = "High Traffic";
-          break;
-        case "2":
-          label = "Heavy Traffic";
-          break;
-        case "3":
-          label = "Congestion";
-          break;
-        default:
-          label = `Traffic Type ${state}`;
-      }
-      
-      return { label, value };
-    });
-  };
-
-  // Helper function to format time in minutes/hours
-  const formatTime = (minutes) => {
     if (minutes < 60) {
-      return `${minutes.toFixed(0)} min`;
+      return `${Math.round(minutes)} min`;
     } else {
       const hours = Math.floor(minutes / 60);
       const mins = Math.round(minutes % 60);
@@ -340,45 +347,68 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
     }
   };
 
+  // Get final destination based on the route path or destinations list
+  const getFinalDestination = (route) => {
+    // For routes with streets data, use the last street as the final destination
+    if (route.streets && route.streets.length > 0) {
+      return route.streets[route.streets.length - 1];
+    }
+    
+    // Otherwise fall back to destinations array
+    if (route.isMultiStop && route.destinations && route.destinations.length > 0) {
+      return route.destinations[route.destinations.length - 1];
+    }
+    
+    return 'Multiple Stops';
+  };
+
+  // Determine the ETA based on the calculated time
+  const calculateETA = (seconds) => {
+    const now = new Date();
+    now.setSeconds(now.getSeconds() + seconds);
+    return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+  
   return (
-    <div className="w-full p-6">
+    <div className="w-full p-6 bg-gray-50">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center mb-6">
           <button
             onClick={() => setActiveTab('upload')}
-            className="flex items-center text-blue-600 hover:text-blue-800"
+            className="flex items-center text-blue-600 hover:text-blue-800 font-medium"
           >
             <ArrowLeft size={16} className="mr-1" />
             Back to Upload
           </button>
-          <h3 className="text-xl font-semibold ml-4">Route Planning Results</h3>
+          
         </div>
 
         {loading && (
-          <div className="text-center py-10">
-            <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p>Loading route results...</p>
+          <div className="text-center py-16 bg-white rounded-xl shadow-lg">
+            <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
+            <p className="text-lg font-medium text-gray-600">Planning your routes...</p>
           </div>
         )}
 
         {error && !loading && (
-          <div className="bg-red-50 text-red-600 p-4 rounded-lg">
-            <p>{error}</p>
+          <div className="bg-red-50 text-red-600 p-8 rounded-xl shadow-lg">
+            <h4 className="text-xl font-bold mb-2">Route Planning Error</h4>
+            <p className="mb-4">{error}</p>
             <button
               onClick={() => setActiveTab('upload')}
-              className="mt-2 text-sm underline"
+              className="px-5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
             >
-              Return to upload
+              Try Again
             </button>
           </div>
         )}
 
         {!loading && !error && routes.length === 0 && (
-          <div className="text-center py-10">
-            <p className="text-gray-500">No routes found</p>
+          <div className="text-center py-16 bg-white rounded-xl shadow-lg">
+            <p className="text-xl text-gray-500 mb-6">No routes found</p>
             <button
               onClick={() => setActiveTab('upload')}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
               Try Again
             </button>
@@ -387,88 +417,159 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
 
         {!loading && !error && routes.length > 0 && (
           <>
-            <div className="bg-gray-50 p-4 rounded-lg mb-4">
-              <p className="text-sm text-gray-600">
-                Showing results for {routes.length} route{routes.length !== 1 ? 's' : ''}
-              </p>
-              <div className="mt-2">
+            <div className="mb-6 bg-gradient-to-r from-blue-500 to-blue-700 text-white p-6 rounded-xl shadow-lg">
+              <div className="flex flex-wrap justify-between items-center">
+                <div>
+                  <h4 className="text-2xl font-bold mb-2">Route Summary</h4>
+                  <p className="text-blue-100">
+                    {routes.length} optimized route{routes.length !== 1 ? 's' : ''} found for your journey
+                  </p>
+                </div>
                 <button
                   onClick={() => setShowMap(!showMap)}
-                  className="text-sm px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                  className="mt-4 md:mt-0 px-4 py-2 bg-white text-blue-700 rounded-lg hover:bg-blue-50 transition-colors shadow-md font-medium flex items-center"
                 >
-                  {showMap ? 'Hide Map' : 'Show Map'}
+                  {showMap ? (
+                    <>
+                      <span className="mr-1">Hide Map</span>
+                      <ChevronUp size={16} />
+                    </>
+                  ) : (
+                    <>
+                      <span className="mr-1">Show Map</span>
+                      <ChevronDown size={16} />
+                    </>
+                  )}
                 </button>
               </div>
             </div>
 
             {/* Map Component */}
             {showMap && (
-              <div className="mb-6">
+              <div className="mb-6 rounded-xl overflow-hidden shadow-lg border-4 border-white">
                 <RouteMap routes={routes} />
               </div>
             )}
-
+            <MapSection routes={routes} render={false} />
             <div className="space-y-6">
               {routes.map((route, index) => (
-                <div key={index} className="bg-white shadow rounded-lg overflow-hidden">
-                  <div className="bg-blue-600 text-white px-4 py-3">
-                    <h4 className="font-medium flex items-center text-lg">
-                      <MapPin size={18} className="mr-2" />
-                      {route.start} to {route.end}
-                    </h4>
-                  </div>
-                  
-                  {route.error ? (
-                    <div className="p-4 bg-red-50 text-red-600">
-                      <p>{route.error}</p>
-                    </div>
-                  ) : (
-                    <div className="p-4">
-                      <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div className="bg-gray-50 p-3 rounded-lg">
-                          <div className="text-sm text-gray-500">Distance</div>
-                          <div className="text-lg font-semibold">
-                            {route.distance.toFixed(2)} km
-                          </div>
+                <div key={index} className="bg-white rounded-xl overflow-hidden shadow-lg transition-all duration-300">
+                  {/* Route Header - Always visible */}
+                  <div 
+                    className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 cursor-pointer"
+                    onClick={() => toggleRouteExpansion(index)}
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center">
+                        <div className="bg-white text-blue-700 rounded-full h-10 w-10 flex items-center justify-center mr-3 shadow-md">
+                          <Car size={20} />
                         </div>
-                        <div className="bg-gray-50 p-3 rounded-lg">
-                          <div className="text-sm text-gray-500">Est. Time</div>
-                          <div className="text-lg font-semibold flex items-center">
-                            <Clock size={16} className="mr-1" />
-                            {formatTime(route.time)}
+                        <div>
+                          <h4 className="font-bold text-lg flex items-center">
+                            {route.start}
+                            <span className="mx-2">→</span>
+                            {route.isMultiStop ? getFinalDestination(route) : 
+                              route.destinations && route.destinations.length === 1 ? route.destinations[0] : "Destination"}
+                          </h4>
+                          <div className="flex items-center text-blue-100 text-sm mt-1">
+                            <span className="flex items-center mr-4">
+                              <Clock size={14} className="mr-1" />
+                              {formatTime(route.time)}
+                            </span>
+                            <span>
+                              {route.distance.toFixed(2)} km
+                            </span>
                           </div>
                         </div>
                       </div>
-                      
-                      {route.streets && route.streets.length > 0 && (
-                        <div className="mb-4">
-                          <h5 className="font-medium mb-2 flex items-center">
-                            <Navigation size={16} className="mr-1" />
-                            Route Path
-                          </h5>
-                          <div className="bg-gray-50 p-3 rounded-lg text-sm">
-                            {route.streets.map((street, i) => (
-                              <React.Fragment key={i}>
-                                {i > 0 && <span className="mx-2 text-gray-400">→</span>}
-                                <span>{street}</span>
-                              </React.Fragment>
-                            ))}
-                          </div>
+                      <div className="flex items-center">
+                        <div className="bg-blue-800 text-white px-3 py-1 rounded-lg shadow-inner mr-3">
+                          <span className="font-bold">ETA: {calculateETA(route.time)}</span>
                         </div>
-                      )}
-                      
-                      {route.traffic && Object.keys(route.traffic).length > 0 && (
-                        <div>
-                          <h5 className="font-medium mb-2">Traffic Conditions</h5>
-                          <div className="grid grid-cols-2 gap-2">
-                            {formatTrafficData(route.traffic).map((item, i) => (
-                              <div key={i} className="flex justify-between text-sm">
-                                <span>{item.label}:</span>
-                                <span className="font-medium">{item.value.toFixed(1)}%</span>
+                        {expandedRoutes[index] ? (
+                          <ChevronUp size={24} className="text-blue-100" />
+                        ) : (
+                          <ChevronDown size={24} className="text-blue-100" />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Expanded content */}
+                  {expandedRoutes[index] && (
+                    <div className="p-6">
+                      {route.error ? (
+                        <div className="p-4 bg-red-50 text-red-600 rounded-lg">
+                          <p>{route.error}</p>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Journey summary cards */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg shadow-md">
+                              <div className="text-sm text-blue-600 mb-1">Total Distance</div>
+                              <div className="text-2xl font-bold text-blue-800">
+                                {route.distance.toFixed(2)} km
                               </div>
-                            ))}
+                            </div>
+                            <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg shadow-md">
+                              <div className="text-sm text-blue-600 mb-1">Travel Time</div>
+                              <div className="text-2xl font-bold text-blue-800 flex items-center">
+                                {formatTime(route.time)}
+                              </div>
+                            </div>
+                            <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg shadow-md">
+                              <div className="text-sm text-blue-600 mb-1">Arrival</div>
+                              <div className="text-2xl font-bold text-blue-800">
+                                {calculateETA(route.time)}
+                              </div>
+                            </div>
                           </div>
-                        </div>
+                          
+                          {/* Destinations/Stops Section - Only for multi-stop routes */}
+                          {route.isMultiStop && route.destinations && route.destinations.length > 1 && (
+                            <div className="mb-6">
+                              <h5 className="font-bold mb-3 flex items-center text-gray-800">
+                                <Flag size={18} className="mr-2 text-blue-600" />
+                                Waypoints
+                              </h5>
+                              <div className="bg-gray-50 rounded-lg shadow-inner">
+                                <ol className="list-none">
+                                  {route.destinations.map((destination, i) => (
+                                    <li key={i} className="flex items-center py-3 px-4 border-b border-gray-200 last:border-0">
+                                      <div className="bg-blue-600 text-white h-6 w-6 rounded-full flex items-center justify-center mr-3 text-sm font-bold">
+                                        {i + 1}
+                                      </div>
+                                      <span className="font-medium">{destination}</span>
+                                    </li>
+                                  ))}
+                                </ol>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Turn-by-turn directions */}
+                          {route.streets && route.streets.length > 0 && (
+                            <div>
+                              <h5 className="font-bold mb-3 flex items-center text-gray-800">
+                                <Navigation size={18} className="mr-2 text-blue-600" />
+                                Turn-by-Turn Directions
+                              </h5>
+                              <div className="bg-gray-50 rounded-lg shadow-inner p-4 max-h-60 overflow-y-auto">
+                                <div className="space-y-2">
+                                  {route.streets.map((street, i) => (
+                                    <div key={i} className="flex items-center">
+                                      {i > 0 && <div className="h-6 border-l-2 border-blue-300 mx-3"></div>}
+                                      <div className="flex-1 py-1 px-3 bg-white rounded-lg shadow-sm">
+                                        <div className="font-medium">{street}</div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   )}

@@ -1,10 +1,11 @@
+//uploadsection.jsx
 import React, { useState } from 'react';
 import { FileSpreadsheet, CheckCircle, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 
-const UploadSection = ({ setActiveTab }) => {
-  const [uploadAccepted, setUploadAccepted, updateOptimizationResults] = useState(false);
+const UploadSection = ({ setActiveTab, updateOptimizationResults }) => {
+  const [uploadAccepted, setUploadAccepted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [debugInfo, setDebugInfo] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);

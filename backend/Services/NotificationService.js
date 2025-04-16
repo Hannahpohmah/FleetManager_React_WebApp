@@ -88,7 +88,7 @@ class NotificationService {
   static async generateNotificationMessage(assignment) {
     const driverName = assignment.driverId?.name || 'Unknown Driver';
     let destinationText = 'Unknown Destination';
-
+  
     try {
       if (assignment.routeId) {
         // Parse the routeId to extract the job ID and route index
@@ -104,17 +104,18 @@ class NotificationService {
             Array.isArray(routeJob.results.routes) && 
             routeJob.results.routes.length > routeIndex) {
           
-          // Extract the destination from the route at the specified index
+          // Extract the destination from the streets array - get the last entry
           const route = routeJob.results.routes[routeIndex];
-          if (route && route.end) {
-            destinationText = route.end;
+          if (route && route.streets && route.streets.length > 0) {
+            // Get the last street in the array as the destination
+            destinationText = route.streets[route.streets.length - 1];
           }
         }
       }
     } catch (error) {
       console.warn('Error fetching destination for notification:', error);
     }
-
+  
     switch(assignment.status) {
       case 'assigned':
         return `New assignment created for ${driverName} to ${destinationText}`;

@@ -831,7 +831,7 @@ router.get('/optimization/:jobId', auth, async (req, res) => {
 });
 
 
-const findRouteWithPython = async (req, rawData, allocationJobId = null) => {
+const findRouteWithPython = async (req, rawData, allocationJobId = null, isGrouped = false) => {
   // Extract user ID from the session token
   const userId = req.user.id;
   
@@ -842,122 +842,222 @@ const findRouteWithPython = async (req, rawData, allocationJobId = null) => {
     console.log(`Processing with optimization job reference: ${allocationJobId}`);
   }
   
-  // Check if customer data processing is requested
-  const processCustomerData = req.body.process_customer_data === 'true';
-  const customerColumnName = req.body.customer_column_name;
-  
-  if (!processCustomerData || !customerColumnName) {
-    // Check if any route has a customer field
-    const hasCustomerData = rawData.some(route => 
-      route.customer || 
-      route.client || 
-      route.name || 
-      route.customerName
-    );
-    
-    if (hasCustomerData) {
-      processCustomerData = true;
-      customerColumnName = rawData.some(route => route.customer) 
-        ? 'customer' 
-        : (rawData.some(route => route.client) 
-          ? 'client' 
-          : (rawData.some(route => route.name) 
-            ? 'name' 
-            : 'customerName'));
-      
-      console.log(`Auto-detected customer data processing. Using column: "${customerColumnName}"`);
-    }
-  }
-  
-  // Extract valid source-destination pairs and customer data if available
-  const { sources, destinations, customers, pairCount, skippedPairs } = RouteResult.extractValidPairs(rawData, customerColumnName);
-  
-  // Validate that we have at least one valid pair
-  if (pairCount === 0) {
-    throw new Error('No valid source-destination pairs found in the data.');
-  }
-  
-  console.log(`Found ${pairCount} valid source-destination pairs. Skipped ${skippedPairs} incomplete entries.`);
-  if (customers && customers.length > 0) {
-    console.log(`Extracted ${customers.length} customer names for record-keeping`);
-  }
-  
   // Generate a unique ID for this job
   const jobId = uuidv4();
   console.log(`Starting route finding job: ${jobId} for user: ${userId}`);
   
-  // Create a new record in the database to track the job
-  const routeRecord = new RouteResult({
-    jobId,
-    user: userId,
-    sources,
-    destinations,
-    customers, // Store customer data in the database record
-    pairCount,
-    skippedPairs,
-    status: 'processing'
-  });
-  
-  // Save the initial record
-  await routeRecord.save();
-  console.log(`Created initial database record with jobId: ${jobId} for user: ${userId}`);
-  
-  const startTime = Date.now();
-  
-  // Process routes one by one
-  let routes = [];
-  let errors = [];
-
-  // Process each route pair sequentially
-  for (let i = 0; i < sources.length; i++) {
-    const source = sources[i];
-    const destination = destinations[i];
-    const customer = customers && customers[i] ? customers[i] : null;
+  // Handle grouped routes (when isGrouped is true)
+  if (isGrouped) {
+    console.log(`Processing grouped routes with ${rawData.length} source groups`);
     
-    console.log(`Processing route ${i+1}/${sources.length}: ${source} to ${destination}${customer ? ` (Customer: ${customer})` : ''}`);
+    // Count total destinations
+    const destinationCount = rawData.reduce((total, group) => {
+      return total + (group.destinations ? group.destinations.length : 0);
+    }, 0);
     
-    try {
-      // Execute Python script for a single route
-      const result = await processRoutePair(source, destination);
-
-      // Preserve the original source, destination, and add customer info
-      const fullRouteResult = {
-        start: source,
-        customer: customer,
-        end: destination,
-        ...result
-      };
+    console.log(`Found ${rawData.length} sources with ${destinationCount} total destinations`);
+    
+    // Create a new record in the database to track the job
+    const routeRecord = new RouteResult({
+      jobId,
+      user: userId,
+      groupedData: rawData,
+      sourceCount: rawData.length,
+      destinationCount,
+      status: 'processing',
+      isGrouped: true,
+      allocationJobId
+    });
+    
+    // Save the initial record
+    await routeRecord.save();
+    console.log(`Created initial database record with jobId: ${jobId} for user: ${userId}`);
+    
+    const startTime = Date.now();
+    
+    // Process each source group
+    let routes = [];
+    let errors = [];
+    
+    for (let i = 0; i < rawData.length; i++) {
+      const sourceGroup = rawData[i];
+      const source = sourceGroup.source;
+      const destinations = sourceGroup.destinations || [];
       
-      if (customer) {
-        fullRouteResult.customer = customer;
+      console.log(`Processing source group ${i+1}/${rawData.length}: ${source} with ${destinations.length} destinations`);
+      
+      // Create customer map for this source group
+      const customerMap = {};
+      if (sourceGroup.customers && sourceGroup.customers.length > 0) {
+        sourceGroup.customers.forEach(customerInfo => {
+          customerMap[customerInfo.destination] = customerInfo.customer;
+        });
       }
       
-      routes.push(fullRouteResult);
-    } catch (error) {
-      console.error(`Error processing route from ${source} to ${destination}: ${error.message}`);
-      errors.push({
-        start: source,
-        end: destination,
-        customer: customer || null,
-        error: error.message
-      });
+      try {
+        // Process all destinations for this source in one call
+        const result = await processRoutePair(source, destinations, true);
+        
+        // Add customer info if available to each destination
+        if (result && result.destinations) {
+          result.destinations.forEach(destResult => {
+            const customer = customerMap[destResult.destination] || null;
+            if (customer) {
+              destResult.customer = customer;
+            }
+          });
+        }
+        
+        routes.push(result);
+      } catch (error) {
+        console.error(`Error processing routes from ${source}: ${error.message}`);
+        errors.push({
+          source,
+          error: error.message
+        });
+      }
     }
+    
+    // Create the final result object
+    const finalResult = {
+      jobId,
+      routes,
+      errors,
+      sourceCount: rawData.length,
+      destinationCount,
+      successCount: routes.reduce((count, group) => 
+        count + (group.destinations ? group.destinations.length : 0), 0),
+      errorCount: errors.length
+    };
+    
+    // Update the database record with results
+    await updateRouteRecord(finalResult, jobId, startTime, userId, 'completed', allocationJobId, true);
+    
+    return {
+      jobId,
+      sourceCount: rawData.length,
+      destinationCount
+    };
+  } 
+  // Original non-grouped processing
+  else {
+    // Check if customer data processing is requested
+    let processCustomerData = req.body.process_customer_data === 'true';
+    let customerColumnName = req.body.customer_column_name;
+    
+    if (!processCustomerData || !customerColumnName) {
+      // Check if any route has a customer field
+      const hasCustomerData = rawData.some(route => 
+        route.customer || 
+        route.client || 
+        route.name || 
+        route.customerName
+      );
+      
+      if (hasCustomerData) {
+        processCustomerData = true;
+        customerColumnName = rawData.some(route => route.customer) 
+          ? 'customer' 
+          : (rawData.some(route => route.client) 
+            ? 'client' 
+            : (rawData.some(route => route.name) 
+              ? 'name' 
+              : 'customerName'));
+        
+        console.log(`Auto-detected customer data processing. Using column: "${customerColumnName}"`);
+      }
+    }
+    
+    // Extract valid source-destination pairs and customer data if available
+    const { sources, destinations, customers, pairCount, skippedPairs } = RouteResult.extractValidPairs(rawData, customerColumnName);
+    
+    // Validate that we have at least one valid pair
+    if (pairCount === 0) {
+      throw new Error('No valid source-destination pairs found in the data.');
+    }
+    
+    console.log(`Found ${pairCount} valid source-destination pairs. Skipped ${skippedPairs} incomplete entries.`);
+    if (customers && customers.length > 0) {
+      console.log(`Extracted ${customers.length} customer names for record-keeping`);
+    }
+    
+    // Create a new record in the database to track the job
+    const routeRecord = new RouteResult({
+      jobId,
+      user: userId,
+      sources,
+      destinations,
+      customers,
+      pairCount,
+      skippedPairs,
+      status: 'processing',
+      isGrouped: false,
+      allocationJobId
+    });
+    
+    // Save the initial record
+    await routeRecord.save();
+    console.log(`Created initial database record with jobId: ${jobId} for user: ${userId}`);
+    
+    const startTime = Date.now();
+    
+    // Process routes one by one
+    let routes = [];
+    let errors = [];
+
+    // Process each route pair sequentially
+    for (let i = 0; i < sources.length; i++) {
+      const source = sources[i];
+      const destination = destinations[i];
+      const customer = customers && customers[i] ? customers[i] : null;
+      
+      console.log(`Processing route ${i+1}/${sources.length}: ${source} to ${destination}${customer ? ` (Customer: ${customer})` : ''}`);
+      
+      try {
+        // Execute Python script for a single route
+        const result = await processRoutePair(source, destination, false);
+
+        // Preserve the original source, destination, and add customer info
+        const fullRouteResult = {
+          start: source,
+          end: destination,
+          ...result
+        };
+        
+        if (customer) {
+          fullRouteResult.customer = customer;
+        }
+        
+        routes.push(fullRouteResult);
+      } catch (error) {
+        console.error(`Error processing route from ${source} to ${destination}: ${error.message}`);
+        errors.push({
+          start: source,
+          end: destination,
+          customer: customer || null,
+          error: error.message
+        });
+      }
+    }
+    
+    // Create the final result object
+    const finalResult = {
+      jobId,
+      routes,
+      errors,
+      totalProcessed: routes.length + errors.length,
+      successCount: routes.length,
+      errorCount: errors.length
+    };
+    
+    // Update the database record with results
+    await updateRouteRecord(finalResult, jobId, startTime, userId, 'completed', allocationJobId, false);
+    
+    return {
+      jobId,
+      pairCount
+    };
   }
-  
-  // Create the final result object
-  const finalResult = {
-    jobId,
-    routes,
-    errors,
-    totalProcessed: routes.length + errors.length,
-    successCount: routes.length,
-    errorCount: errors.length
-  };
-  
-  // Update the database record with results
-  await updateRouteRecord(finalResult, jobId, startTime, userId, 'completed', allocationJobId);
-  
-  return finalResult;
 };
 
 RouteResult.extractValidPairs = (rawData, customerColumnName = null) => {
@@ -1002,17 +1102,33 @@ RouteResult.extractValidPairs = (rawData, customerColumnName = null) => {
   return { sources, destinations, customers, pairCount, skippedPairs };
 };
 
-const processRoutePair = (source, destination) => {
+// Modify processRoutePair to handle both single routes and multiple destinations
+const processRoutePair = (source, destination, isMultiDestination = false) => {
   return new Promise((resolve, reject) => {
-    // Create a temporary file for this pair
+    // Create a temporary file for this pair or group
     const tempId = uuidv4();
     const dataPath = path.join(process.cwd(), 'temp', `${tempId}.json`);
     
-    // Write source and destination to file
-    fs.writeFileSync(dataPath, JSON.stringify({ 
-      source, 
-      destination 
-    }));
+    let dataToWrite;
+    
+    if (isMultiDestination && Array.isArray(destination)) {
+      // For grouped routes with multiple destinations
+      dataToWrite = { 
+        source, 
+        destinations: destination,
+        isMultiDestination: true
+      };
+    } else {
+      // For single destination route
+      dataToWrite = { 
+        source, 
+        destination,
+        isMultiDestination: false
+      };
+    }
+    
+    // Write data to file
+    fs.writeFileSync(dataPath, JSON.stringify(dataToWrite));
     
     const options = {
       mode: 'text',
@@ -1023,55 +1139,41 @@ const processRoutePair = (source, destination) => {
     
     let pyshell = new PythonShell('./app.py', options);
     let resultFound = false;
+    let stderrBuffer = ''; // Buffer to accumulate stderr output
     
     pyshell.stderr.on('data', (data) => {
       if (resultFound) return;
       const dataStr = data.toString();
       console.log(`Python stderr: ${dataStr}`);
       
-      // Check for direct JSON objects (this is the most reliable method)
-      if (dataStr.trim().startsWith('{') && dataStr.trim().endsWith('}')) {
-        try {
-          const jsonObj = JSON.parse(dataStr.trim());
-          // Check if it has the expected route properties
-          if (jsonObj.distance !== undefined && 
-              jsonObj.time !== undefined && 
-              jsonObj.traffic !== undefined && 
-              jsonObj.streets !== undefined) {
-            console.log('Found complete route JSON object in real-time');
+      // Accumulate stderr data
+      stderrBuffer += dataStr;
+      
+      // Specifically look for "Route Result:" marker followed by JSON
+      if (dataStr.includes('Route Result:')) {
+        // Try to extract the JSON after "Route Result:"
+        const routeResultIndex = stderrBuffer.lastIndexOf('Route Result:');
+        if (routeResultIndex !== -1) {
+          const jsonStartIndex = routeResultIndex + 'Route Result:'.length;
+          const jsonString = stderrBuffer.substring(jsonStartIndex).trim();
+          
+          // Try to parse the JSON
+          try {
+            console.log('Found Route Result, attempting to parse JSON');
+            const jsonObj = JSON.parse(jsonString);
             
             // Mark that we found a result to avoid further processing
             resultFound = true;
             
-            const result = {
-              start: source,
-              end: destination,
-              distance: jsonObj.distance || 0,
-              time: jsonObj.time || 0,
-              streets: jsonObj.streets || [],
-              traffic: jsonObj.traffic || {}
-            };
-            
             // Clean up the temp file
             try { fs.unlinkSync(dataPath); } catch (e) { /* ignore */ }
             
-            resolve(result);
+            resolve(jsonObj);
             return;
+          } catch (e) {
+            console.log('JSON parsing error for Route Result:', e.message);
+            // Not valid JSON yet, continue accumulating
           }
-          
-          // Also check if it's an error object
-          if (jsonObj.error) {
-            console.log('Found error JSON in real-time');
-            resultFound = true;
-            
-            // Clean up the temp file
-            try { fs.unlinkSync(dataPath); } catch (e) { /* ignore */ }
-            
-            reject(new Error(jsonObj.error));
-            return;
-          }
-        } catch (e) {
-          // Not valid JSON, continue
         }
       }
     });
@@ -1086,6 +1188,23 @@ const processRoutePair = (source, destination) => {
       if (err) {
         reject(err);
         return;
+      }
+      
+      // Try one more time with the complete buffer
+      try {
+        // Look for Route Result: followed by JSON
+        const routeResultRegex = /Route Result:\s*(\{[\s\S]*\})/;
+        const resultMatch = stderrBuffer.match(routeResultRegex);
+        
+        if (resultMatch && resultMatch[1]) {
+          const jsonStr = resultMatch[1];
+          console.log('Attempting to parse final Route Result JSON');
+          const jsonObj = JSON.parse(jsonStr);
+          resolve(jsonObj);
+          return;
+        }
+      } catch (e) {
+        console.log('Final JSON parsing error:', e.message);
       }
       
       // If we got here and haven't found a result yet, that's an error
@@ -1153,6 +1272,8 @@ router.post('/find_route', auth, upload.single('file'), async (req, res) => {
       - Specified Column: ${customerColumnName || 'Not specified'}
     `);
 
+    let routeData = [];
+
     if (req.file) {
       console.log('Processing file upload request');
       // Handle Excel file upload
@@ -1209,7 +1330,7 @@ router.post('/find_route', auth, upload.single('file'), async (req, res) => {
         }
         
         // Transform Excel data to array of objects with source, destination and customer (if present)
-        const routeData = df.map(row => {
+        routeData = df.map(row => {
           // Find the column that matches 'Source' and 'Destination' (case-insensitive)
           const sourceKey = findColumnKey(row, 'source');
           const destKey = findColumnKey(row, 'destination');
@@ -1241,23 +1362,6 @@ router.post('/find_route', auth, upload.single('file'), async (req, res) => {
         }).filter(Boolean); // Remove null entries
         
         console.log(`Prepared ${routeData.length} valid routes from Excel file`);
-        
-        try {
-          // Process all routes in a single batch
-          const result = await findRouteWithPython(req, routeData, optimizationJobId);
-          
-          console.log(`Route finding job completed: ${result.jobId}`);
-          return res.status(200).json({ 
-            jobId: result.jobId,
-            status: 'processing',
-            message: `Processing ${result.pairCount} routes. Check status with /route_status/${result.jobId}`
-          });
-        } catch (error) {
-          console.error(`Error in batch route processing: ${error.message}`);
-          return res.status(500).json({ 
-            error: `Error in batch route processing: ${error.message}` 
-          });
-        }
       } catch (error) {
         console.error(`Error processing Excel file: ${error.message}`);
         return res.status(500).json({ 
@@ -1285,51 +1389,87 @@ router.post('/find_route', auth, upload.single('file'), async (req, res) => {
           });
         }
         
-        try {
-          // Create a single-element array for the route
-          const routeData = [{ 
-            source: start, 
-            destination: end, 
-            customer: customer 
-          }];
-          
-          const result = await findRouteWithPython(req, routeData, optimizationJobId);
-          
-          console.log(`Route finding job submitted: ${result.jobId}`);
-          return res.status(200).json({ 
-            jobId: result.jobId,
-            status: 'processing',
-            message: `Processing route from "${start}" to "${end}". Check status with /route_status/${result.jobId}`
-          });
-        } catch (error) {
-          console.error(`Error in single route processing: ${error.message}`);
-          return res.status(500).json({ 
-            error: `Error in single route processing: ${error.message}` 
-          });
-        }
+        // Create a single-element array for the route
+        routeData = [{ 
+          source: start, 
+          destination: end, 
+          customer: customer 
+        }];
       } else if (Array.isArray(data.routes)) {
         // Multiple routes case
         console.log(`Direct input - multiple routes: ${data.routes.length} routes`);
-        
-        try {
-          const result = await findRouteWithPython(req, data.routes, optimizationJobId);
-          
-          console.log(`Route finding job submitted: ${result.jobId}`);
-          return res.status(200).json({ 
-            jobId: result.jobId,
-            status: 'processing',
-            message: `Processing ${result.pairCount} routes. Check status with /route_status/${result.jobId}`
-          });
-        } catch (error) {
-          console.error(`Error in multiple route processing: ${error.message}`);
-          return res.status(500).json({ 
-            error: `Error in multiple route processing: ${error.message}` 
-          });
-        }
+        routeData = data.routes;
       } else {
         console.error('Invalid request format');
         return res.status(400).json({ 
           error: "Invalid request format. Provide either start/end parameters or routes array." 
+        });
+      }
+    }
+    
+    // Group routes by source if optimizationJobId is provided
+    if (optimizationJobId && routeData.length > 0) {
+      console.log(`Grouping routes by source for optimization job: ${optimizationJobId}`);
+      
+      // Create a map of sources to destinations
+      const groupedRoutes = {};
+      
+      routeData.forEach(route => {
+        if (!groupedRoutes[route.source]) {
+          groupedRoutes[route.source] = {
+            source: route.source,
+            destinations: [],
+            customers: []
+          };
+        }
+        
+        groupedRoutes[route.source].destinations.push(route.destination);
+        
+        // Add customer if available
+        if (route.customer) {
+          groupedRoutes[route.source].customers.push({
+            destination: route.destination,
+            customer: route.customer
+          });
+        }
+      });
+      
+      // Convert the map to an array
+      const groupedRouteData = Object.values(groupedRoutes);
+      
+      console.log(`Grouped ${routeData.length} routes into ${groupedRouteData.length} source groups`);
+      
+      try {
+        // Process the grouped routes
+        const result = await findRouteWithPython(req, groupedRouteData, optimizationJobId, true);
+        
+        console.log(`Route finding job completed: ${result.jobId}`);
+        return res.status(200).json({ 
+          jobId: result.jobId,
+          status: 'processing',
+          message: `Processing ${result.sourceCount} sources with ${result.destinationCount} total destinations. Check status with /route_status/${result.jobId}`
+        });
+      } catch (error) {
+        console.error(`Error in grouped route processing: ${error.message}`);
+        return res.status(500).json({ 
+          error: `Error in grouped route processing: ${error.message}` 
+        });
+      }
+    } else {
+      // Original workflow for non-grouped routes
+      try {
+        const result = await findRouteWithPython(req, routeData, optimizationJobId);
+        
+        console.log(`Route finding job submitted: ${result.jobId}`);
+        return res.status(200).json({ 
+          jobId: result.jobId,
+          status: 'processing',
+          message: `Processing ${result.pairCount} routes. Check status with /route_status/${result.jobId}`
+        });
+      } catch (error) {
+        console.error(`Error in route processing: ${error.message}`);
+        return res.status(500).json({ 
+          error: `Error in route processing: ${error.message}` 
         });
       }
     }

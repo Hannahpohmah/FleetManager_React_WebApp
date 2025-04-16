@@ -70,7 +70,7 @@ const validateObjectId = (req, res, next) => {
 router.get('/stats', async (req, res) => {
   try {
     // Detailed logging for debugging
-    console.log('Stats request received at:', new Date().toISOString());
+    //console.log('Stats request received at:', new Date().toISOString());
 
     const [
       totalDrivers,
