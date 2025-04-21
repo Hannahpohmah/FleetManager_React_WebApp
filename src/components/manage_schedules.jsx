@@ -129,37 +129,31 @@ const ScheduleManager = () => {
     setError(null);
     setSuccess(false);
     setConflictErrors([]);
-    
+  
     try {
-      // Format the data for API - Only include notes if they exist
+      // Check if any route is missing a driver assignment
+      const unassignedRoutes = Object.keys(assignments).filter(routeId => !assignments[routeId]);
+  
+      if (unassignedRoutes.length > 0) {
+        setError('Please assign a driver to every route before saving.');
+        return;
+      }
+  
       const assignmentData = Object.keys(assignments).map(routeId => {
-        console.log(`Preparing assignment for route ${routeId} with driver ${assignments[routeId]}`);
-        
-        // Create the assignment object with required fields
         const assignment = {
           routeId,
           driverId: assignments[routeId],
           date: selectedDate,
         };
-        
-        // Only add notes if they exist and aren't empty
         const notes = driverNotes[routeId];
         if (notes && notes.trim() !== '') {
           assignment.notes = notes;
         }
-        
         return assignment;
-      }).filter(item => item.driverId); // Only include routes that have been assigned
-      
+      });
+  
       console.log(`Saving ${assignmentData.length} assignments for date ${selectedDate}`);
-      
-      if (assignmentData.length === 0) {
-        setError('No assignments to save. Please assign at least one route to a driver.');
-        return;
-      }
-      
-      // Send to API
-      console.log('Posting assignments to API...');
+  
       const response = await fetch(`${API_BASE_URL}/api/assignments`, {
         method: 'POST',
         headers: {
@@ -168,28 +162,24 @@ const ScheduleManager = () => {
         },
         body: JSON.stringify({ assignments: assignmentData }),
       });
-
+  
       const data = await response.json();
-      
+  
       if (!response.ok) {
         if (response.status === 409) {
-          // Handle conflict errors
-          console.warn('Conflict detected when saving assignments:', data.conflicts);
           setConflictErrors(data.conflicts || []);
           throw new Error('Some routes already have assignments for this date');
         }
-        console.error('Failed to save assignments:', data.message);
         throw new Error(data.message || 'Failed to save assignments');
       }
-
-      console.log('Assignments saved successfully:', data);
+  
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
-      console.error('Error in handleSaveAssignments:', err);
       setError(err.message);
     }
   };
+  
 
   // Find matching allocations for a source and destination
   const findMatchingAllocations = (source, destinations) => {

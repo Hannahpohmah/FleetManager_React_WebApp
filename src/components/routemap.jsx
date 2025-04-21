@@ -1,21 +1,62 @@
-//routemap.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { MapPin, Loader } from 'lucide-react';
+import { MapPin, Loader, AlertCircle, MapIcon, Car } from 'lucide-react';
 
 const RouteMap = ({ routes = [], driverLocations = [] }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [mapData, setMapData] = useState([]);
   const [progress, setProgress] = useState(0);
+  const [userLocation, setUserLocation] = useState(null);
+  const [dataStatus, setDataStatus] = useState({
+    noRoutes: false,
+    noDrivers: false
+  });
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const driverMarkersRef = useRef([]); // Store driver markers for easy updates
   const abortControllersRef = useRef([]); // Store AbortControllers for cleanup
+  const userMarkerRef = useRef(null); // Reference for user location marker
   
+  // Check data availability on component mount
   useEffect(() => {
+    const routesEmpty = !routes || routes.length === 0;
+    const driversEmpty = !driverLocations || driverLocations.length === 0;
+    
+    setDataStatus({
+      noRoutes: routesEmpty,
+      noDrivers: driversEmpty
+    });
+    
+    // If both are empty, try to get user location
+    if (routesEmpty && driversEmpty) {
+      getUserLocation();
+    }
+    
     console.log("RouteMap component received routes:", routes);
     console.log("RouteMap component received driver locations:", driverLocations);
   }, [routes, driverLocations]);
+  
+  // Get user's current location
+  const getUserLocation = () => {
+    // Only proceed if we don't already have user location
+    if (userLocation === null && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          setUserLocation([latitude, longitude]);
+        },
+        (error) => {
+          console.error("Error getting user location:", error);
+          // Default to Accra if we can't get user location
+          setUserLocation([5.6037, -0.1870]);
+        }
+      );
+    } else if (userLocation === null) {
+      console.log("Geolocation not supported");
+      // Default to Accra if geolocation is not supported
+      setUserLocation([5.6037, -0.1870]);
+    }
+  };
   
   // Initialize the map
   useEffect(() => {
@@ -29,6 +70,12 @@ const RouteMap = ({ routes = [], driverLocations = [] }) => {
       window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       }).addTo(mapInstanceRef.current);
+      
+      // Store the routeLayers property directly on the map instance
+      mapInstanceRef.current.routeLayers = [];
+      
+      // Complete loading state once map is initialized
+      setLoading(false);
     }
     
     // Clean up on unmount
@@ -49,54 +96,31 @@ const RouteMap = ({ routes = [], driverLocations = [] }) => {
     };
   }, []);
 
-
-  // In the useEffect hook for driver markers
-  // Modified useEffect hook for driver markers
-useEffect(() => {
-  if (!mapInstanceRef.current || !driverLocations || driverLocations.length === 0) return;
-  
-  console.log("Processing driver locations:", driverLocations);
-  
-  // Clear previous driver markers
-  driverMarkersRef.current.forEach(marker => {
-    mapInstanceRef.current.removeLayer(marker);
-  });
-  driverMarkersRef.current = [];
-  
-  // Collect all driver points to use for bounds calculation
-  const driverPoints = [];
-  
-  // Add new driver markers
-  driverLocations.forEach((driver, index) => {
-    // Check for latitude/longitude directly on driver object
-    if (!driver.latitude || !driver.longitude) {
-      console.log(`Driver ${index} missing coordinates:`, driver);
-      return;
+  // Display user location on map
+  useEffect(() => {
+    if (!mapInstanceRef.current || !userLocation) return;
+    
+    // Remove existing user marker if present
+    if (userMarkerRef.current) {
+      mapInstanceRef.current.removeLayer(userMarkerRef.current);
+      userMarkerRef.current = null;
     }
     
-    // Collect driver location for bounds calculation
-    const driverLocation = [driver.latitude, driver.longitude];
-    driverPoints.push(driverLocation);
-    
-    console.log(`Adding driver marker for ${driver.driverName || 'Unknown'} at:`, driverLocation);
-    
-    // Create driver marker with custom icon that looks like a car
-    const driverMarker = window.L.marker(driverLocation, {
+    // Create user location marker
+    userMarkerRef.current = window.L.marker(userLocation, {
       icon: window.L.divIcon({
-        className: 'driver-marker',
+        className: 'user-marker',
         html: `
           <div style="position: relative; width: 40px; height: 40px;">
             <div style="position: absolute; top: 0; left: 0; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
-              <div style="background-color: #3b82f6; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; transform: rotate(${driver.heading || 0}deg);">
-                <!-- Car icon -->
+              <div style="background-color: #10b981; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"></path>
-                  <circle cx="6.5" cy="16.5" r="2.5"></circle>
-                  <circle cx="16.5" cy="16.5" r="2.5"></circle>
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <circle cx="12" cy="12" r="3"></circle>
                 </svg>
               </div>
             </div>
-            ${driver.driverName ? `<div style="position: absolute; top: 30px; left: -30px; background-color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">${driver.driverName}</div>` : ''}
+            <div style="position: absolute; top: 30px; left: -20px; background-color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">Your Location</div>
           </div>
         `,
         iconSize: [40, 40],
@@ -104,56 +128,144 @@ useEffect(() => {
       })
     }).addTo(mapInstanceRef.current);
     
-    // Add popup with driver information
-    const popupContent = `
-      <div>
-        <strong>${driver.driverName || `Driver ${index + 1}`}</strong>
-        ${driver.status ? `<div>Status: ${driver.status}</div>` : ''}
-        ${driver.vehicle ? `<div>Vehicle: ${driver.vehicle}</div>` : ''}
-        ${driver.timestamp ? `<div>Last updated: ${new Date(driver.timestamp).toLocaleTimeString()}</div>` : ''}
-      </div>
-    `;
+    // Only center map on user if no other points are available
+    if ((!driverLocations || driverLocations.length === 0) && 
+        (!routes || routes.length === 0)) {
+      mapInstanceRef.current.setView(userLocation, 15);
+    }
     
-    driverMarker.bindPopup(popupContent);
-    driverMarkersRef.current.push(driverMarker);
-  });
-  
-  // Handle map bounds to show all drivers and routes
-  if (driverPoints.length > 0) {
-    // First, check if we have route data
-    const hasRouteData = mapData && mapData.length > 0;
+  }, [userLocation, driverLocations, routes]);
+
+  // In the useEffect hook for driver markers
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
     
-    // If no route data or we're initializing the map, fit to driver points
-    if (!hasRouteData) {
+    // Clear previous driver markers
+    driverMarkersRef.current.forEach(marker => {
+      mapInstanceRef.current.removeLayer(marker);
+    });
+    driverMarkersRef.current = [];
+    
+    if (!driverLocations || driverLocations.length === 0) {
+      // No driver locations to display
+      console.log("No driver locations to display");
+      mapInstanceRef.current.driverPoints = [];
+      return;
+    }
+    
+    console.log("Processing driver locations:", driverLocations);
+    
+    // Collect all driver points to use for bounds calculation later
+    const driverPoints = [];
+    
+    // Add new driver markers
+    driverLocations.forEach((driver, index) => {
+      // Check for latitude/longitude directly on driver object
+      if (!driver.latitude || !driver.longitude) {
+        console.log(`Driver ${index} missing coordinates:`, driver);
+        return;
+      }
+      
+      // Collect driver location for bounds calculation
+      const driverLocation = [driver.latitude, driver.longitude];
+      driverPoints.push(driverLocation);
+      
+      console.log(`Adding driver marker for ${driver.driverName || 'Unknown'} at:`, driverLocation);
+      
+      // Create driver marker with custom icon that looks like a car
+      const driverMarker = window.L.marker(driverLocation, {
+        icon: window.L.divIcon({
+          className: 'driver-marker',
+          html: `
+            <div style="position: relative; width: 40px; height: 40px;">
+              <div style="position: absolute; top: 0; left: 0; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+                <div style="background-color: #3b82f6; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; transform: rotate(${driver.heading || 0}deg);">
+                  <!-- Car icon -->
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"></path>
+                    <circle cx="6.5" cy="16.5" r="2.5"></circle>
+                    <circle cx="16.5" cy="16.5" r="2.5"></circle>
+                  </svg>
+                </div>
+              </div>
+              ${driver.driverName ? `<div style="position: absolute; top: 30px; left: -30px; background-color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">${driver.driverName}</div>` : ''}
+            </div>
+          `,
+          iconSize: [40, 40],
+          iconAnchor: [20, 20]
+        })
+      }).addTo(mapInstanceRef.current);
+      
+      // Add popup with driver information
+      const popupContent = `
+        <div>
+          <strong>${driver.driverName || `Driver ${index + 1}`}</strong>
+          ${driver.status ? `<div>Status: ${driver.status}</div>` : ''}
+          ${driver.vehicle ? `<div>Vehicle: ${driver.vehicle}</div>` : ''}
+          ${driver.timestamp ? `<div>Last updated: ${new Date(driver.timestamp).toLocaleTimeString()}</div>` : ''}
+        </div>
+      `;
+      
+      driverMarker.bindPopup(popupContent);
+      driverMarkersRef.current.push(driverMarker);
+    });
+    
+    // Store driver points for later use in the combined bounds calculation
+    mapInstanceRef.current.driverPoints = driverPoints;
+    
+    // If we don't have routes, fit bounds to driver locations now
+    if (!routes || routes.length === 0) {
+      fitMapToCombinedPoints();
+    }
+  }, [driverLocations]);
+  const fitMapToCombinedPoints = () => {
+    if (!mapInstanceRef.current) return;
+    
+    // Collect all points: driver locations, user location, and route points
+    const allPoints = [];
+    
+    // Add driver points if available
+    if (mapInstanceRef.current.driverPoints && mapInstanceRef.current.driverPoints.length > 0) {
+      allPoints.push(...mapInstanceRef.current.driverPoints);
+    }
+    
+    // Add user location if available
+    if (userLocation) {
+      allPoints.push(userLocation);
+    }
+    
+    // Only fit bounds if we have points
+    if (allPoints.length > 0) {
       try {
-        // Create a bounds object and expand it to include all driver points
-        const bounds = window.L.latLngBounds(driverPoints);
-        
-        // Check if Accra is already in view (common routes area)
-        const accraPoint = [5.6037, -0.1870];
-        bounds.extend(accraPoint);
-        
-        // Add some padding to ensure markers are fully visible
+        const bounds = window.L.latLngBounds(allPoints);
         mapInstanceRef.current.fitBounds(bounds.pad(0.2));
-        
-        
       } catch (error) {
         console.error("Error setting map bounds:", error);
-        // Fallback to Accra as center
+        // Fallback to default location
         mapInstanceRef.current.setView([5.6037, -0.1870], 13);
       }
+    } else {
+      // Fallback to default location
+      mapInstanceRef.current.setView([5.6037, -0.1870], 13);
     }
-  }
-}, [driverLocations, mapData]);
+  };
+
   // Geocode and display routes when routes change
   useEffect(() => {
-    if (!routes || routes.length === 0 || !mapInstanceRef.current) return;
+    if (!mapInstanceRef.current) return;
+    
+    // If we have driver locations but no routes, skip the route processing
+    if (!routes || routes.length === 0) {
+      console.log("No routes to process - skipping route processing");
+      return;
+    }
+    
+    // Start routes processing
+    setLoading(true);
+    setError(null);
+    setProgress(0);
     
     const geocodeAndDisplayRoutes = async () => {
-      setLoading(true);
-      setError(null);
-      setProgress(0);
-      
       // Cancel any previous pending requests
       abortControllersRef.current.forEach(controller => {
         try {
@@ -258,7 +370,16 @@ useEffect(() => {
         );
         
         setMapData(processedRoutes);
-        displayRoutesOnMap(processedRoutes);
+        
+        // Make sure we use the function we imported from your utility file
+        if (typeof displayRoutesOnMap === 'function') {
+          displayRoutesOnMap(processedRoutes);
+        } else {
+          console.error("displayRoutesOnMap function is not available");
+        }
+        
+        // After routes are processed, fit map to all points
+        fitMapToCombinedPoints();
       } catch (err) {
         console.error('Error processing routes:', err);
         setError('Failed to process routes: ' + err.message);
@@ -599,15 +720,7 @@ useEffect(() => {
       // Handle known streets in Accra with hardcoded coordinates
       const knownStreets = {
         "10th Street": [5.6025, -0.1870],
-        "3rd Street": [5.6020, -0.1855],
-        "16th Street": [5.6010, -0.1840],
-        "29th Avenue": [5.6000, -0.1825],
-        "22nd Street": [5.5990, -0.1810],
-        "14th Street": [5.5980, -0.1795],
-        "1948 Military Street": [5.6030, -0.1885],
-        "19th November Street": [5.6073, -0.1880],
-        "28th Street": [5.6032, -0.1901],
-        "Kumordji Street": [5.6040, -0.1860]
+        "3rd Street": [5.6020, -0.1855]
         // Add other known streets as needed
       };
       
@@ -821,113 +934,158 @@ useEffect(() => {
   };
 
   // Display routes on the map with improved styling and accuracy
-  const displayRoutesOnMap = (geocodedRoutes) => {
-    if (!mapInstanceRef.current) return;
-    
-    // Clear previous routes
-    if (mapInstanceRef.current.routeLayers) {
-      mapInstanceRef.current.routeLayers.forEach(layer => {
-        mapInstanceRef.current.removeLayer(layer);
+  // Utility functions
+const mapUtils = {
+  getRouteColor: (index) => {
+    const colors = ['#3b82f6', '#ef4444', '#10b981', '#f97316', '#8b5cf6', '#ec4899'];
+    return colors[index % colors.length];
+  },
+  
+  createMarker: (point, options) => {
+    return window.L.marker(point, {
+      icon: window.L.divIcon(options)
+    });
+  },
+  
+  fitMapToPoints: (map, points, padding = 0.2) => {
+    if (points.length > 0) {
+      try {
+        const bounds = window.L.latLngBounds(points);
+        map.fitBounds(bounds.pad(padding));
+      } catch (error) {
+        console.error("Error setting map bounds:", error);
+        // Fallback to Accra as center
+        map.setView([5.6037, -0.1870], 13);
+      }
+    }
+  }
+};
+
+// Marker creators
+const markerCreators = {
+  createStartMarker: (point, routeColor) => {
+    return mapUtils.createMarker(point, {
+      className: 'start-marker',
+      html: `<div style="background-color: ${routeColor}; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;">S</div>`,
+      iconSize: [26, 26],
+      iconAnchor: [13, 13]
+    });
+  },
+  
+  createEndMarker: (point, routeColor) => {
+    return mapUtils.createMarker(point, {
+      className: 'end-marker',
+      html: `<div style="background-color: ${routeColor}; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;">E</div>`,
+      iconSize: [26, 26],
+      iconAnchor: [13, 13]
+    });
+  },
+  
+  createStopMarker: (point, routeColor, index) => {
+    return mapUtils.createMarker(point, {
+      className: 'stop-marker',
+      html: `<div style="background-color: ${routeColor}; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">${index+1}</div>`,
+      iconSize: [18, 18],
+      iconAnchor: [9, 9]
+    });
+  },
+  
+  createWaypointMarker: (point, routeColor) => {
+    return mapUtils.createMarker(point, {
+      className: 'waypoint-marker',
+      html: `<div style="background-color: ${routeColor}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);"></div>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
+    });
+  },
+  
+  createStreetLabel: (point, routeColor, streetName) => {
+    return mapUtils.createMarker(point, {
+      className: 'street-label',
+      html: `<div style="background-color: white; padding: 2px 5px; border-radius: 3px; font-size: 10px; font-weight: bold; color: ${routeColor}; border: 1px solid ${routeColor}; white-space: nowrap;">${streetName}</div>`,
+      iconSize: [150, 20],
+      iconAnchor: [75, 10]
+    });
+  }
+};
+
+// Route processing functions 
+const routeProcessors = {
+  clearPreviousRoutes: (map) => {
+    if (map.routeLayers) {
+      map.routeLayers.forEach(layer => {
+        map.removeLayer(layer);
       });
     }
-    
-    mapInstanceRef.current.routeLayers = [];
-    const allPoints = [];
-    
-    // Add new routes with proper styling
-    geocodedRoutes.forEach((route, routeIndex) => {
-      if (!route.segments || route.segments.length === 0) return;
-      
-      const routeColor = getRouteColor(routeIndex);
-      
-      // Process each segment of the route
-      route.segments.forEach((segment, segmentIndex) => {
-        if (!segment.points || segment.points.length === 0) return;
-        
-        // Add points to the collection for map bounds
-        allPoints.push(...segment.points);
-        
-        // Create a polyline for this segment
-        const routeLine = window.L.polyline(segment.points, {
-          color: routeColor,
-          weight: segment.isConnector ? 3 : 5, // Main streets are thicker
-          opacity: segment.isConnector ? 0.6 : 0.8, // Main streets are more opaque
-          dashArray: segment.isConnector ? "5, 5" : null // Connectors are dashed
-        }).addTo(mapInstanceRef.current);
-        
-        
-        // Add popup with segment information
-        routeLine.bindPopup(`<strong>${segment.name}</strong>`);
-        mapInstanceRef.current.routeLayers.push(routeLine);
-      });
-      
-      // Use the endDestination we stored earlier for display
-      const endDestination = route.endDestination || route.end;
-      
-      // Add start marker
-      if (route.startPoint) {
-        const startMarker = window.L.marker(route.startPoint, {
-          icon: window.L.divIcon({
-            className: 'start-marker',
-            html: `<div style="background-color: ${routeColor}; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;">S</div>`,
-            iconSize: [26, 26],
-            iconAnchor: [13, 13]
-          })
-        }).addTo(mapInstanceRef.current);
-        
-        startMarker.bindPopup(`<strong>Start: ${route.start}</strong>`);
-        mapInstanceRef.current.routeLayers.push(startMarker);
-        allPoints.push(route.startPoint);
-      }
-      
-      // Add end marker
-      if (route.endPoint) {
-        const endMarker = window.L.marker(route.endPoint, {
-          icon: window.L.divIcon({
-            className: 'end-marker',
-            html: `<div style="background-color: ${routeColor}; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;">E</div>`,
-            iconSize: [26, 26],
-            iconAnchor: [13, 13]
-          })
-        }).addTo(mapInstanceRef.current);
-        
-        // Use the corrected end destination
-        endMarker.bindPopup(`<strong>End: ${endDestination}</strong>`);
-        mapInstanceRef.current.routeLayers.push(endMarker);
-        allPoints.push(route.endPoint);
-      }
-      
- // For multi-stop routes, add stop markers
-if (route.destinations && route.destinations.length > 0) {
-  // Mark this as a multi-stop route
-  route.isMultiStop = true;
+    map.routeLayers = [];
+  },
   
-  // Process each destination except the final one (which is already marked as the end)
-  route.destinations.forEach((destination, idx) => {
-    // Skip the last destination as it's already marked as the end
-    if (idx === route.destinations.length - 1 && destination === endDestination) return;
+  processRouteSegments: (map, route, routeColor, allRoutePoints) => {
+    if (!route.segments || route.segments.length === 0) return;
     
-    // Find this destination in the streets array
-    const streetIndex = route.streets.indexOf(destination);
+    route.segments.forEach((segment, segmentIndex) => {
+      if (!segment.points || segment.points.length === 0) return;
+      
+      // Add points to the collection for map bounds
+      allRoutePoints.push(...segment.points);
+      
+      // Create a polyline for this segment
+      const routeLine = window.L.polyline(segment.points, {
+        color: routeColor,
+        weight: segment.isConnector ? 3 : 5,
+        opacity: segment.isConnector ? 0.6 : 0.8,
+        dashArray: segment.isConnector ? "5, 5" : null
+      }).addTo(map);
+      
+      routeLine.bindPopup(`<strong>${segment.name}</strong>`);
+      map.routeLayers.push(routeLine);
+    });
+  },
+  
+  addStartEndMarkers: (map, route, routeColor, allRoutePoints) => {
+    const endDestination = route.endDestination || route.end;
+    
+    // Add start marker
+    if (route.startPoint) {
+      const startMarker = markerCreators.createStartMarker(route.startPoint, routeColor)
+        .addTo(map);
+      
+      startMarker.bindPopup(`<strong>Start: ${route.start}</strong>`);
+      map.routeLayers.push(startMarker);
+      allRoutePoints.push(route.startPoint);
+    }
+    
+    // Add end marker
+    if (route.endPoint) {
+      const endMarker = markerCreators.createEndMarker(route.endPoint, routeColor)
+        .addTo(map);
+      
+      endMarker.bindPopup(`<strong>End: ${endDestination}</strong>`);
+      map.routeLayers.push(endMarker);
+      allRoutePoints.push(route.endPoint);
+    }
+  },
+  
+  findDestinationPoint: (route, destination) => {
+    // Find point for the destination in different possible data structures
     let point = null;
     
+    // Check in streets array
+    const streetIndex = route.streets ? route.streets.indexOf(destination) : -1;
     if (streetIndex >= 0) {
-      // If we found the street in the streets array, get its points
-      // We need to find the corresponding streetPoints
       if (route.streetPoints && route.streetPoints[streetIndex] && 
           route.streetPoints[streetIndex].points && route.streetPoints[streetIndex].points.length > 0) {
-        // Use the first point of the street for the marker
         point = route.streetPoints[streetIndex].points[0];
       }
     } else {
-      // If the destination is not found in streets array, search in pathSegments
+      // Check in pathSegments
       const pathIndex = route.pathSegments ? route.pathSegments.indexOf(destination) : -1;
       if (pathIndex >= 0 && route.streetPoints && route.streetPoints[pathIndex]) {
         point = route.streetPoints[pathIndex].points[0];
       }
     }
     
-    // If we still don't have a point, search through all street points for a matching name
+    // Search by name in all streetPoints
     if (!point && route.streetPoints) {
       const matchingStreet = route.streetPoints.find(sp => sp.name === destination);
       if (matchingStreet && matchingStreet.points && matchingStreet.points.length > 0) {
@@ -935,108 +1093,124 @@ if (route.destinations && route.destinations.length > 0) {
       }
     }
     
-    // If we have a point, create the marker
-    if (point) {
-      const stopMarker = window.L.marker(point, {
-        icon: window.L.divIcon({
-          className: 'stop-marker',
-          html: `<div style="background-color: ${routeColor}; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">${idx+1}</div>`,
-          iconSize: [18, 18],
-          iconAnchor: [9, 9]
-        })
-      }).addTo(mapInstanceRef.current);
+    return point;
+  },
+  
+  addStopMarkers: async (map, route, routeColor) => {
+    if (!route.destinations || route.destinations.length === 0) return;
+    
+    // Mark this as a multi-stop route
+    route.isMultiStop = true;
+    const endDestination = route.endDestination || route.end;
+    
+    // Process each destination except the final one
+    route.destinations.forEach(async (destination, idx) => {
+      // Skip the last destination as it's already marked as the end
+      if (idx === route.destinations.length - 1 && destination === endDestination) return;
       
-      stopMarker.bindPopup(`<strong>Stop ${idx+1}: ${destination}</strong>`);
-      mapInstanceRef.current.routeLayers.push(stopMarker);
-    } else {
-      // If we couldn't find the point, we need to geocode the destination
-      // This is a fallback method
-      const geocodeAndAddMarker = async () => {
+      // Find point for this destination
+      let point = routeProcessors.findDestinationPoint(route, destination);
+      
+      // If we have a point, create the marker
+      if (point) {
+        const stopMarker = markerCreators.createStopMarker(point, routeColor, idx)
+          .addTo(map);
+        
+        stopMarker.bindPopup(`<strong>Stop ${idx+1}: ${destination}</strong>`);
+        map.routeLayers.push(stopMarker);
+      } else {
+        // Fallback to geocoding
         try {
           const geocodedPoint = await geocodeLocation(`${destination}, Accra, Ghana`);
           if (geocodedPoint && geocodedPoint.length > 0) {
-            const stopMarker = window.L.marker(geocodedPoint[0], {
-              icon: window.L.divIcon({
-                className: 'stop-marker',
-                html: `<div style="background-color: ${routeColor}; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">${idx+1}</div>`,
-                iconSize: [18, 18],
-                iconAnchor: [9, 9]
-              })
-            }).addTo(mapInstanceRef.current);
+            const stopMarker = markerCreators.createStopMarker(geocodedPoint[0], routeColor, idx)
+              .addTo(map);
             
             stopMarker.bindPopup(`<strong>Stop ${idx+1}: ${destination}</strong>`);
-            mapInstanceRef.current.routeLayers.push(stopMarker);
+            map.routeLayers.push(stopMarker);
           }
         } catch (error) {
           console.error(`Failed to geocode waypoint: ${destination}`, error);
         }
-      };
-      
-      geocodeAndAddMarker();
-    }
-  });
-}
-      
-      // Add waypoint markers at each street junction
-      if (route.pathSegments && route.pathSegments.length > 0) {
-        route.pathSegments.forEach((streetName, idx) => {
-          if (idx === 0 || idx === route.pathSegments.length - 1) return; // Skip first and last
-          
-          if (route.streetPoints && route.streetPoints[idx] && 
-              route.streetPoints[idx].points && route.streetPoints[idx].points.length > 0) {
-            const point = route.streetPoints[idx].points[0];
-            const waypointMarker = window.L.marker(point, {
-              icon: window.L.divIcon({
-                className: 'waypoint-marker',
-                html: `<div style="background-color: ${routeColor}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);"></div>`,
-                iconSize: [16, 16],
-                iconAnchor: [8, 8]
-              })
-            }).addTo(mapInstanceRef.current);
-            
-            waypointMarker.bindPopup(`<strong>Waypoint: ${streetName}</strong>`);
-            mapInstanceRef.current.routeLayers.push(waypointMarker);
-          }
-        });
-      }
-      
-      // Add street name labels for clear identification
-      if (route.pathSegments && route.streetPoints) {
-        route.pathSegments.forEach((streetName, idx) => {
-          const streetData = route.streetPoints[idx];
-          if (streetData && streetData.points && streetData.points.length > 0) {
-            // Add label at the midpoint of the street
-            const midIndex = Math.floor(streetData.points.length / 2);
-            const labelPoint = streetData.points[midIndex] || streetData.points[0];
-            
-            const streetLabel = window.L.marker(labelPoint, {
-              icon: window.L.divIcon({
-                className: 'street-label',
-                html: `<div style="background-color: white; padding: 2px 5px; border-radius: 3px; font-size: 10px; font-weight: bold; color: ${routeColor}; border: 1px solid ${routeColor}; white-space: nowrap;">${streetName}</div>`,
-                iconSize: [150, 20],
-                iconAnchor: [75, 10]
-              })
-            }).addTo(mapInstanceRef.current);
-            
-            mapInstanceRef.current.routeLayers.push(streetLabel);
-          }
-        });
       }
     });
+  },
+  
+  addWaypointMarkers: (map, route, routeColor) => {
+    if (!route.pathSegments || route.pathSegments.length === 0) return;
     
-    // Fit the map to show all points
-    if (allPoints.length > 0) {
-      mapInstanceRef.current.fitBounds(window.L.latLngBounds(allPoints).pad(0.1));
-    }
-  };
+    route.pathSegments.forEach((streetName, idx) => {
+      if (idx === 0 || idx === route.pathSegments.length - 1) return; // Skip first and last
+      
+      if (route.streetPoints && route.streetPoints[idx] && 
+          route.streetPoints[idx].points && route.streetPoints[idx].points.length > 0) {
+        const point = route.streetPoints[idx].points[0];
+        const waypointMarker = markerCreators.createWaypointMarker(point, routeColor)
+          .addTo(map);
+        
+        waypointMarker.bindPopup(`<strong>Waypoint: ${streetName}</strong>`);
+        map.routeLayers.push(waypointMarker);
+      }
+    });
+  },
+  
+  addStreetLabels: (map, route, routeColor) => {
+    if (!route.pathSegments || !route.streetPoints) return;
     
- 
+    route.pathSegments.forEach((streetName, idx) => {
+      const streetData = route.streetPoints[idx];
+      if (streetData && streetData.points && streetData.points.length > 0) {
+        // Add label at the midpoint of the street
+        const midIndex = Math.floor(streetData.points.length / 2);
+        const labelPoint = streetData.points[midIndex] || streetData.points[0];
+        
+        const streetLabel = markerCreators.createStreetLabel(labelPoint, routeColor, streetName)
+          .addTo(map);
+        
+        map.routeLayers.push(streetLabel);
+      }
+    });
+  }
+};
 
-  // Get a color for each route
-  const getRouteColor = (index) => {
-    const colors = ['#3b82f6', '#ef4444', '#10b981', '#f97316', '#8b5cf6', '#ec4899'];
-    return colors[index % colors.length];
-  };
+// Main function
+const displayRoutesOnMap = async (geocodedRoutes) => {
+  const map = mapInstanceRef.current;
+  if (!map) return;
+  
+  // Clear previous routes
+  routeProcessors.clearPreviousRoutes(map);
+  
+  const allRoutePoints = [];
+  
+  // Process each route
+  for (const [routeIndex, route] of geocodedRoutes.entries()) {
+    const routeColor = mapUtils.getRouteColor(routeIndex);
+    
+    // Process route segments
+    routeProcessors.processRouteSegments(map, route, routeColor, allRoutePoints);
+    
+    // Add start and end markers
+    routeProcessors.addStartEndMarkers(map, route, routeColor, allRoutePoints);
+    
+    // Add stop markers for multi-stop routes
+    await routeProcessors.addStopMarkers(map, route, routeColor);
+    
+    // Add waypoint markers
+    routeProcessors.addWaypointMarkers(map, route, routeColor);
+    
+    // Add street labels
+    routeProcessors.addStreetLabels(map, route, routeColor);
+  }
+  
+  // Combine with any existing driver points
+  const driverPoints = map.driverPoints || [];
+  const allCombinedPoints = [...allRoutePoints, ...driverPoints];
+  
+  // Fit the map to show all points
+  mapUtils.fitMapToPoints(map, allCombinedPoints);
+};
+
 
   return (
     <div className="w-full p-4 bg-white shadow rounded-lg">
@@ -1049,6 +1223,43 @@ if (route.destinations && route.destinations.length > 0) {
           </div>
         )}
       </div>
+      
+      {/* Data Status Alerts */}
+      {(dataStatus.noRoutes || dataStatus.noDrivers) && !loading && (
+        <div className="mb-4">
+          {dataStatus.noRoutes && dataStatus.noDrivers ? (
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded flex items-start">
+              <AlertCircle size={18} className="text-yellow-500 mt-0.5 mr-2" />
+              <div>
+                <p className="text-yellow-700 font-medium">No route or driver data available</p>
+                <p className="text-yellow-600 text-sm">Showing map centered on {userLocation ? 'your location' : 'Accra, Ghana'}</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {dataStatus.noRoutes && (
+                <div className="p-3 mb-2 bg-blue-50 border border-blue-200 rounded flex items-start">
+                  <MapIcon size={18} className="text-blue-500 mt-0.5 mr-2" />
+                  <div>
+                    <p className="text-blue-700">No route data available</p>
+                    <p className="text-blue-600 text-sm">Displaying available driver locations</p>
+                  </div>
+                </div>
+              )}
+              
+              {dataStatus.noDrivers && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded flex items-start">
+                  <Car size={18} className="text-blue-500 mt-0.5 mr-2" />
+                  <div>
+                    <p className="text-blue-700">No driver data available</p>
+                    <p className="text-blue-600 text-sm">Displaying available routes</p>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
       
       {error && (
         <div className="p-4 mb-4 bg-red-50 text-red-600 rounded">
@@ -1081,7 +1292,7 @@ if (route.destinations && route.destinations.length > 0) {
       {!loading && (
         <div className="mt-4">
           {/* Route Legend */}
-          {mapData.length > 0 && (
+          {routes && routes.length > 0 && mapData.length > 0 && (
             <>
               <h5 className="font-medium mb-2">Routes Legend</h5>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1136,32 +1347,46 @@ if (route.destinations && route.destinations.length > 0) {
           
           {/* Driver Legend */}
           {driverLocations && driverLocations.length > 0 && (
-  <>
-    <h5 className="font-medium mt-4 mb-2">Drivers</h5>
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {driverLocations.map((driver, index) => (
-        <div key={index} className="flex items-center p-2 border rounded bg-gray-50">
-          <div className="flex-shrink-0 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-2">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"></path>
-              <circle cx="6.5" cy="16.5" r="2.5"></circle>
-              <circle cx="16.5" cy="16.5" r="2.5"></circle>
-            </svg>
-          </div>
-          <div className="text-sm overflow-hidden">
-            <div className="font-medium">{driver.driverName || `Driver ${index + 1}`}</div>
-            {driver.status && <div className="text-xs text-gray-600">Status: {driver.status}</div>}
-            {driver.timestamp && <div className="text-xs text-gray-600">Last seen: {new Date(driver.timestamp).toLocaleTimeString()}</div>}
-          </div>
-        </div>
-      ))}
-    </div>
-  </>
+            <>
+              <h5 className="font-medium mt-4 mb-2">Drivers</h5>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {driverLocations.map((driver, index) => (
+                  <div key={index} className="flex items-center p-2 border rounded bg-gray-50">
+                    <div className="flex-shrink-0 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"></path>
+                        <circle cx="6.5" cy="16.5" r="2.5"></circle>
+                        <circle cx="16.5" cy="16.5" r="2.5"></circle>
+                      </svg>
+                    </div>
+                    <div className="text-sm overflow-hidden">
+                      <div className="font-medium">{driver.driverName || `Driver ${index + 1}`}</div>
+                      {driver.status && <div className="text-xs text-gray-600">Status: {driver.status}</div>}
+                      {driver.timestamp && <div className="text-xs text-gray-600">Last seen: {new Date(driver.timestamp).toLocaleTimeString()}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          
+          {/* User Location Note */}
+          {dataStatus.noRoutes && dataStatus.noDrivers && userLocation && (
+            <div className="mt-4 text-center text-sm text-gray-500">
+              <p>Map centered on your current location</p>
+              <p className="text-xs">Coordinates: {userLocation[0].toFixed(4)}, {userLocation[1].toFixed(4)}</p>
+            </div>
           )}
         </div>
       )}
     </div>
   );
+};
+
+// Function to get a color for each route
+const getRouteColor = (index) => {
+  const colors = ['#3b82f6', '#ef4444', '#10b981', '#f97316', '#8b5cf6', '#ec4899'];
+  return colors[index % colors.length];
 };
 
 export default RouteMap;

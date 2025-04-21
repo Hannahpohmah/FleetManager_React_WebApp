@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Truck, Bell, LogOut, User } from 'lucide-react';
 import NotificationComponent from './NotificationContext';
 
 const Header = () => {
@@ -60,25 +61,42 @@ const Header = () => {
   };
 
   return (
-    <div className="bg-white shadow-sm flex-none">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16 items-center">
-          <h1 className="text-xl font-bold">Logistics Optimization System</h1>
-          <div className="flex items-center space-x-4">
-            <span className="text-sm">
-              {loading ? 'Loading...' : `Welcome, ${managerName}`}
-            </span>
-            <NotificationComponent />
-            <button
-              className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 transition-colors"
-              onClick={handleLogout}
-            >
-              Logout
-            </button>
+    <header className="app-header">
+      <div className="header-container">
+        <div className="app-logo">
+          <Truck size={24} />
+          <span>Logistics Optimization System</span>
+        </div>
+        
+        <div className="user-actions">
+          <div className="welcome-text">
+            {loading ? (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                <span>Loading...</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <User size={16} className="text-gray-400" />
+                Welcome, <span className="user-name">{managerName}</span>
+              </div>
+            )}
           </div>
+          
+          <div className="notification-badge">
+            <NotificationComponent />
+          </div>
+          
+          <button 
+            className="logout-btn flex items-center gap-2" 
+            onClick={handleLogout}
+          >
+            <LogOut size={16} />
+            <span>Logout</span>
+          </button>
         </div>
       </div>
-    </div>
+    </header>
   );
 };
 

@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2 } from 'lucide-react';
 
 const fetchDashboardStats = async () => {
@@ -30,15 +29,21 @@ const fetchDashboardStats = async () => {
     return [
       { 
         title: 'Total Drivers', 
-        value: data.totalDrivers !== undefined ? data.totalDrivers : 'N/A' 
+        value: data.totalDrivers !== undefined ? data.totalDrivers : 'N/A',
+        icon: 'Users',
+        color: '#3b82f6'
       },
       { 
         title: 'Active Drivers', 
-        value: data.activeDrivers !== undefined ? data.activeDrivers : 'N/A' 
+        value: data.activeDrivers !== undefined ? data.activeDrivers : 'N/A',
+        icon: 'UserCheck',
+        color: '#10b981'
       },
       { 
         title: 'Inactive Drivers', 
-        value: data.inactiveDrivers !== undefined ? data.inactiveDrivers : 'N/A' 
+        value: data.inactiveDrivers !== undefined ? data.inactiveDrivers : 'N/A',
+        icon: 'UserMinus',
+        color: '#f59e0b'
       }
     ];
   } catch (error) {
@@ -46,9 +51,9 @@ const fetchDashboardStats = async () => {
     
     // More informative error handling
     return [
-      { title: 'Total Drivers', value: 'Fetch Error' },
-      { title: 'Active Drivers', value: 'Fetch Error' },
-      { title: 'Inactive Drivers', value: 'Fetch Error' }
+      { title: 'Total Drivers', value: 'N/A', icon: 'Users', color: '#3b82f6' },
+      { title: 'Active Drivers', value: 'N/A', icon: 'UserCheck', color: '#10b981' },
+      { title: 'Inactive Drivers', value: 'N/A', icon: 'UserMinus', color: '#f59e0b' }
     ];
   }
 };
@@ -82,56 +87,65 @@ const Sidebar = ({ activeTab, setActiveTab, navItems }) => {
     return () => clearInterval(intervalId);
   }, []);
 
-  // Error rendering
+  // Error rendering in an attractive way
   if (error) {
     return (
-      <Card>
-        <CardContent className="p-4 text-red-500">
-          Error loading dashboard stats: {error}
-        </CardContent>
-      </Card>
+      <div className="sidebar-nav p-4">
+        <div className="bg-red-50 text-red-500 p-4 rounded-md border border-red-200">
+          <h3 className="font-medium mb-2">Unable to load stats</h3>
+          <p className="text-sm text-red-600">Please check your connection and try refreshing the page.</p>
+        </div>
+      </div>
     );
   }
 
   return (
     <>
-      <Card>
-        <CardContent className="p-4">
-          <nav className="space-y-2">
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center space-x-2 p-2 rounded transition-colors ${
-                  activeTab === item.id ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100'
-                }`}
-              >
-                <item.icon size={20} />
-                <span>{item.label}</span>
-              </button>
-            ))}
-          </nav>
-        </CardContent>
-      </Card>
+      <div className="sidebar-nav">
+        <nav className="py-2">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`nav-item w-full ${activeTab === item.id ? 'active' : ''}`}
+            >
+              <item.icon size={20} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+      </div>
 
-      <div className="mt-6 space-y-6">
+      <div className="stats-container">
         {isLoading ? (
-          <Card>
-            <CardContent className="flex items-center justify-center p-6">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+          <div className="stat-card">
+            <div className="loading-spinner p-6">
+              <Loader2 className="h-8 w-8 spin text-blue-500" />
               <span className="ml-2">Loading stats...</span>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         ) : (
           dashboardStats.map((stat, index) => (
-            <Card key={index}>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">{stat.title}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stat.value}</div>
-              </CardContent>
-            </Card>
+            <div className="stat-card" key={index}>
+              <div className="stat-header">
+                <div className="stat-title">{stat.title}</div>
+              </div>
+              <div className="stat-content">
+                {/* Create a colored circle with the value inside */}
+                <div 
+                  className="w-12 h-12 rounded-full flex items-center justify-center mr-3" 
+                  style={{ 
+                    backgroundColor: `${stat.color}15`, // Very light version of the color
+                    color: stat.color 
+                  }}
+                >
+                  <span className="text-lg font-bold">{typeof stat.value === 'number' ? stat.value : '-'}</span>
+                </div>
+                <div className="stat-value">
+                  {stat.value}
+                </div>
+              </div>
+            </div>
           ))
         )}
       </div>

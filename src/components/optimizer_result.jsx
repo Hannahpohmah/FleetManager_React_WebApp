@@ -18,7 +18,8 @@ const OptimizerResults = ({ setActiveTab }) => {
   const [routeProcessingSteps, setRouteProcessingSteps] = useState([]);
   
   // Access the optimization results from context
-  const { optimizationResults, updateOptimizationResults } = useContext(OptimizationContext);
+  // Change this line in OptimizerResults
+  const { optimizationResults, updateOptimizationResults } = useContext(OptimizationContext) || {};
   
   // API base URL - change this to match your Flask server address
   const API_BASE_URL = 'http://localhost:5000';

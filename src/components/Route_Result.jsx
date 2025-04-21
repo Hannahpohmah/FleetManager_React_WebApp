@@ -71,7 +71,9 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
       const normalizedRoutes = normalizeRoutesData(routesData);
       console.log('Normalized routes:', normalizedRoutes);
       setRoutes(normalizedRoutes);
-      
+      if (props.updateRoutes) {
+        props.updateRoutes(normalizedRoutes);
+      }
       // Initialize expanded state for all routes
       const initialExpandedState = {};
       normalizedRoutes.forEach((_, index) => {

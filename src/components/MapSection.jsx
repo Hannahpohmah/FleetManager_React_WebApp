@@ -2,12 +2,45 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import RouteMap from './routemap';
 
-const MapSection = ({ routes, render = true }) => {
+const MapSection = ({ routes, render = true, currentLocation }) => {
   const [driverLocations, setDriverLocations] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [storedRoutes, setStoredRoutes] = useState([]);
-  
+  const [fleetManagerLocation, setFleetManagerLocation] = useState(null);
+
+  // Use currentLocation from props if available, otherwise fetch from browser
+  useEffect(() => {
+    if (currentLocation) {
+      // Convert from {lat, lng} format to {latitude, longitude} format
+      setFleetManagerLocation({
+        latitude: currentLocation.lat,
+        longitude: currentLocation.lng
+      });
+    } else {
+      fetchFleetManagerLocation();
+    }
+  }, [currentLocation]);
+
+  // Get fleet manager's location (from browser as backup)
+  const fetchFleetManagerLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          setFleetManagerLocation({ latitude, longitude });
+        },
+        (error) => {
+          console.error("Error getting fleet manager location:", error);
+          setFleetManagerLocation(null);
+        }
+      );
+    } else {
+      console.warn("Geolocation not supported by this browser.");
+      setFleetManagerLocation(null);
+    }
+  };
+
   // Fetch driver locations from your API
   const fetchDriverLocations = async () => {
     try {
@@ -98,7 +131,12 @@ const MapSection = ({ routes, render = true }) => {
   // Only render UI if render prop is true
   return (
     <div className="mb-6 rounded-xl overflow-hidden shadow-lg border-4 border-white">
-      <RouteMap routes={displayRoutes} driverLocations={driverLocations} />
+      <RouteMap
+        routes={displayRoutes}
+        driverLocations={driverLocations}
+        fleetManagerLocation={fleetManagerLocation}
+      />
+
       {isLoading && (
         <div className="text-center py-2 bg-gray-100">
           <p className="text-sm text-gray-600">Updating driver locations...</p>
