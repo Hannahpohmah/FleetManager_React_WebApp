@@ -19,8 +19,10 @@ const app = express();
 // Middleware
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'X-Requested-With']
+  methods: '*',
+  allowedHeaders: '*',  // Allow any header
+  exposedHeaders: '*',  // Expose all headers
+  credentials: true 
 }));
 app.use(express.json());
 
