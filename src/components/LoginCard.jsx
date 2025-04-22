@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { User, Key, AlertCircle, CheckCircle, Mail } from 'lucide-react';
-
+const API_BASE_URL = 'http://localhost:5000';
 const LoginCard = () => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [email, setEmail] = useState('');
@@ -27,7 +27,7 @@ const LoginCard = () => {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:5000/api/auth/login', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -74,7 +74,7 @@ const LoginCard = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:5000/api/auth/request-access', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/request-access`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

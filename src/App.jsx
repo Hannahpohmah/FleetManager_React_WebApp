@@ -12,7 +12,7 @@ import RouteHistorySection from './components/RouteHistorySection';
 import RouteResults from './components/Route_Result';
 import OptimizerResults from './components/optimizer_result';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'http://localhost:5000';
 
 // Create a context for sharing optimization results across components
 export const OptimizationContext = React.createContext();
@@ -74,8 +74,8 @@ const App = () => {
 
   // Navigation items with enhanced icons and labels
   const navItems = [
-    { id: 'map', icon: MapPin, label: 'Route Map', description: 'View and manage delivery routes' },
     { id: 'upload', icon: Upload, label: 'Upload Data', description: 'Import Logistics related data' },
+    { id: 'map', icon: MapPin, label: 'Route Map', description: 'View Routes and Track driver' },
     { id: 'drivers', icon: Users, label: 'Manage Drivers', description: 'Add and update driver information' },
     { id: 'routes', icon: Route, label: 'Route History', description: 'Review past delivery routes' },
     // Add the optimizer results tab if we have results
@@ -106,7 +106,17 @@ const App = () => {
 
   // Get the active tab configuration
   const activeTabConfig = navItems.find(item => item.id === activeTab) || navItems[0];
-
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    sessionStorage.setItem('activeTab', tab);
+  };
+  useEffect(() => {
+    const storedActiveTab = sessionStorage.getItem('activeTab');
+    if (storedActiveTab) {
+      setActiveTab(storedActiveTab);
+    }
+  }, []); // Empty dependency array to run once on component mount
+  
   return (
     <OptimizationContext.Provider value={{ optimizationResults, updateOptimizationResults }}>
       <div className="app-container">

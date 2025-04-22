@@ -4,7 +4,7 @@ import { ArrowLeft, MapPin, Clock, Navigation, Flag, ChevronDown, ChevronUp, Car
 import RouteMap from './routemap'; // Import the RouteMap component
 import MapSection from './MapSection';
 
-const RouteResults = ({ setActiveTab, optimizationResults }) => {
+const RouteResults = ({ setActiveTab, optimizationResults, updateRoutes }) => {
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -71,8 +71,8 @@ const RouteResults = ({ setActiveTab, optimizationResults }) => {
       const normalizedRoutes = normalizeRoutesData(routesData);
       console.log('Normalized routes:', normalizedRoutes);
       setRoutes(normalizedRoutes);
-      if (props.updateRoutes) {
-        props.updateRoutes(normalizedRoutes);
+      if (updateRoutes) {
+        updateRoutes(normalizedRoutes);
       }
       // Initialize expanded state for all routes
       const initialExpandedState = {};

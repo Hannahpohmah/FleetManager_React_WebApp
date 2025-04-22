@@ -3,7 +3,7 @@ import { Users } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import ScheduleManager from './manage_schedules'; // Import the new component
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'http://localhost:5000';
 
 const DriversSection = ({ API_BASE_URL: apiBaseUrlProp }) => {
   const apiBaseUrl = apiBaseUrlProp || API_BASE_URL;
@@ -34,7 +34,7 @@ const DriversSection = ({ API_BASE_URL: apiBaseUrlProp }) => {
 
   const fetchDrivers = async () => {
     try {
-      const response = await fetch(`${apiBaseUrl}/drivers`);
+      const response = await fetch(`${apiBaseUrl}/api/drivers`);
       if (!response.ok) throw new Error('Failed to fetch drivers');
       const data = await response.json();
       setDrivers(data);
@@ -75,7 +75,7 @@ const DriversSection = ({ API_BASE_URL: apiBaseUrlProp }) => {
 
     setLoading(true);
     try {
-      const response = await fetch(`${apiBaseUrl}/drivers`, {
+      const response = await fetch(`${apiBaseUrl}/api/drivers`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

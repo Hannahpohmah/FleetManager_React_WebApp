@@ -7,7 +7,8 @@ const NotificationComponent = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [newNotificationsCount, setNewNotificationsCount] = useState(0);
 
-  const API_BASE_URL = 'http://localhost:5000/api/notifications';
+  const API_BASE_URL = 'http://localhost:5000';
+
 
   const fetchNotifications = async () => {
     try {
@@ -15,7 +16,7 @@ const NotificationComponent = () => {
       
       if (!token) return;
 
-      const response = await fetch(`${API_BASE_URL}`, {
+      const response = await fetch(`${API_BASE_URL}/api/notifications`, {
         method: 'GET',
         headers: {
           'x-auth-token': token,
@@ -40,7 +41,7 @@ const NotificationComponent = () => {
       
       if (!token) return;
 
-      const response = await fetch(`${API_BASE_URL}/mark-read`, {
+      const response = await fetch(`${API_BASE_URL}/api/notifications/mark-read`, {
         method: 'POST',
         headers: {
           'x-auth-token': token,

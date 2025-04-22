@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import RouteMap from './routemap';
 
+const API_BASE_URL = 'http://localhost:5000';
 const MapSection = ({ routes, render = true, currentLocation }) => {
   const [driverLocations, setDriverLocations] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -45,7 +46,7 @@ const MapSection = ({ routes, render = true, currentLocation }) => {
   const fetchDriverLocations = async () => {
     try {
       setIsLoading(true);
-      const response = await axios.get('http://localhost:5000/api/drivers/locations');
+      const response = await axios.get(`${API_BASE_URL}/api/drivers/locations`);
       
       if (response.data && Array.isArray(response.data)) {
         // Process driver data with proper validation
