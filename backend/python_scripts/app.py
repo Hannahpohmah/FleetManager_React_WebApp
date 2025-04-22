@@ -265,28 +265,75 @@ def optimize_transport(data_path):
         with open(data_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        print(f"Data loaded successfully: {len(data['sources'])} sources, {len(data['destinations'])} destinations", file=sys.stderr)
+        # Check which format the data is in and convert if necessary
+        if "source" in data and "destinations" in data and data.get("isMultiDestination", False):
+            # For grouped routes, need capacity info for source and demand info for destinations
+            if "capacity" not in data:
+                raise KeyError("Missing 'capacity' for source in grouped data format")
+                
+            sources = [{"source_street": data["source"], "capacity": data["capacity"]}]
+            
+            # Check if destinations have demand values
+            destinations = []
+            for i, dest in enumerate(data["destinations"]):
+                if isinstance(dest, dict) and "street" in dest and "demand" in dest:
+                    destinations.append({"dest_street": dest["street"], "demand": dest["demand"]})
+                else:
+                    raise KeyError(f"Destination {i+1} is missing 'street' or 'demand' fields")
+            
+            print(f"Converted grouped data: 1 source, {len(destinations)} destinations", file=sys.stderr)
+            
+        elif "source" in data and "destination" in data and not data.get("isMultiDestination", False):
+            # For single pair format, need capacity and demand info
+            if "capacity" not in data:
+                raise KeyError("Missing 'capacity' for source in single pair format")
+            if "demand" not in data:
+                raise KeyError("Missing 'demand' for destination in single pair format")
+                
+            sources = [{"source_street": data["source"], "capacity": data["capacity"]}]
+            destinations = [{"dest_street": data["destination"], "demand": data["demand"]}]
+            
+            print(f"Converted single pair data: 1 source, 1 destination", file=sys.stderr)
+            
+        elif "sources" in data and "destinations" in data:
+            # Data is already in the expected format
+            sources = data["sources"]
+            destinations = data["destinations"]
+            
+            # Validate each source has required fields
+            for i, source in enumerate(sources):
+                if "source_street" not in source or "capacity" not in source:
+                    raise KeyError(f"Source {i+1} is missing 'source_street' or 'capacity' fields")
+            
+            # Validate each destination has required fields
+            for i, dest in enumerate(destinations):
+                if "dest_street" not in dest or "demand" not in dest:
+                    raise KeyError(f"Destination {i+1} is missing 'dest_street' or 'demand' fields")
+            
+            print(f"Data loaded successfully: {len(sources)} sources, {len(destinations)} destinations", file=sys.stderr)
+        else:
+            raise KeyError("Data must contain either 'sources'/'destinations' keys or 'source'/'destinations' for grouped data")
         
-        sources = []
-        for i, source in enumerate(data["sources"]):
+        source_requests = []
+        for i, source in enumerate(sources):
             try:
-                sources.append(LogisticsRequest(source["source_street"], source["capacity"]))
+                source_requests.append(LogisticsRequest(source["source_street"], source["capacity"]))
                 print(f"Added source {i+1}: {source['source_street']} with capacity {source['capacity']}", file=sys.stderr)
             except Exception as e:
                 print(f"Error adding source {i+1}: {str(e)}", file=sys.stderr)
         
-        destinations = []
-        for i, dest in enumerate(data["destinations"]):
+        destination_requests = []
+        for i, dest in enumerate(destinations):
             try:
-                destinations.append(LogisticsDestination(dest["dest_street"], dest["demand"]))
+                destination_requests.append(LogisticsDestination(dest["dest_street"], dest["demand"]))
                 print(f"Added destination {i+1}: {dest['dest_street']} with demand {dest['demand']}", file=sys.stderr)
             except Exception as e:
                 print(f"Error adding destination {i+1}: {str(e)}", file=sys.stderr)
         
-        print(f"Starting optimization with {len(sources)} sources and {len(destinations)} destinations", file=sys.stderr)
+        print(f"Starting optimization with {len(source_requests)} sources and {len(destination_requests)} destinations", file=sys.stderr)
         
         try:
-            allocations = logistics_optimizer.optimize_transport_allocation(sources, destinations)
+            allocations = logistics_optimizer.optimize_transport_allocation(source_requests, destination_requests)
             print(f"Optimization complete, generated {len(allocations)} allocations", file=sys.stderr)
         except Exception as e:
             print(f"Error during optimization process: {str(e)}", file=sys.stderr)
@@ -302,7 +349,7 @@ def optimize_transport(data_path):
             })
       
         result = {"allocations": allocation_results}
-        print(safe_json_dumps(result), file=sys.stderr) 
+        print(f"Route Result: {safe_json_dumps(result)}", file=sys.stderr) 
         
         return result
             
