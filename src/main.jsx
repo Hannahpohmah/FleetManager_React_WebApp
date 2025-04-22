@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import './index.css'
 import LandingPage from './LandingPage.jsx'
 import App from './App.jsx'
@@ -11,19 +12,13 @@ const PrivateRoute = ({ children }) => {
   return isAuthenticated ? children : <Navigate to="/" />;
 };
 
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <Router basename="/FleetManager_React_WebApp">
+    <Router>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route 
-          path="/app" 
-          element={
-            <PrivateRoute>
-              <App />
-            </PrivateRoute>
-          } 
-        />
+        <Route path="/app" element={<PrivateRoute><App /></PrivateRoute>} />
       </Routes>
     </Router>
   </StrictMode>,
