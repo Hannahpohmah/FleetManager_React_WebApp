@@ -12,7 +12,8 @@ import RouteHistorySection from './components/RouteHistorySection';
 import RouteResults from './components/Route_Result';
 import OptimizerResults from './components/optimizer_result';
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
 
 // Create a context for sharing optimization results across components
 export const OptimizationContext = React.createContext();

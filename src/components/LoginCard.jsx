@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { User, Key, AlertCircle, CheckCircle, Mail } from 'lucide-react';
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
 const LoginCard = () => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [email, setEmail] = useState('');

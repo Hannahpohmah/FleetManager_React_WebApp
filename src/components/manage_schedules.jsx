@@ -15,7 +15,8 @@ const ScheduleManager = () => {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [routeJobId, setRouteJobId] = useState('');
 
-  const API_BASE_URL = 'http://localhost:5000';
+  const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
 
   useEffect(() => {
     fetchData();

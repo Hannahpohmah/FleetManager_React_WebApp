@@ -15,7 +15,8 @@ const UploadSection = ({ setActiveTab, updateOptimizationResults }) => {
   const [customerColumnName, setCustomerColumnName] = useState(null);
   const navigate = useNavigate();
   // API base URL - change this to match your Flask server address
-  const API_BASE_URL = 'http://localhost:5000';
+  const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
 
   // Customer column keywords - any column containing these words will be treated as customer data
   const CUSTOMER_KEYWORDS = ['customer', 'retailer', 'distributor'];

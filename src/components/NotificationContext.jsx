@@ -7,7 +7,8 @@ const NotificationComponent = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [newNotificationsCount, setNewNotificationsCount] = useState(0);
 
-  const API_BASE_URL = 'http://localhost:5000';
+  const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
 
 
   const fetchNotifications = async () => {

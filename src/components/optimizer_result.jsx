@@ -22,7 +22,8 @@ const OptimizerResults = ({ setActiveTab }) => {
   const { optimizationResults, updateOptimizationResults } = useContext(OptimizationContext) || {};
   
   // API base URL - change this to match your Flask server address
-  const API_BASE_URL = 'http://localhost:5000';
+  const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
   
   // Reference to the results container for PDF generation
   const resultsRef = React.createRef();

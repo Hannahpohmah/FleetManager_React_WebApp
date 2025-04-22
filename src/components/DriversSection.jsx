@@ -3,7 +3,8 @@ import { Users } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import ScheduleManager from './manage_schedules'; // Import the new component
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
 
 const DriversSection = ({ API_BASE_URL: apiBaseUrlProp }) => {
   const apiBaseUrl = apiBaseUrlProp || API_BASE_URL;

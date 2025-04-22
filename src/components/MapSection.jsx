@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import RouteMap from './routemap';
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
 const MapSection = ({ routes, render = true, currentLocation }) => {
   const [driverLocations, setDriverLocations] = useState([]);
   const [isLoading, setIsLoading] = useState(false);

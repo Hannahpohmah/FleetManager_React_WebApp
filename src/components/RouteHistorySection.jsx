@@ -25,7 +25,8 @@ const FlippableHistoryPage = () => {
         }
         
         // Use the correct API base URL for your environment
-        const API_BASE_URL ='http://localhost:5000';
+        const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
         
         // Fetch data sequentially to better identify issues
         console.log('Fetching route history...');

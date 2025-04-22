@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
 
 const fetchDashboardStats = async () => {
   try {
-    const response = await fetch('/api/drivers/stats', {
+    const response = await fetch(`${API_BASE_URL}/api/drivers/stats`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',

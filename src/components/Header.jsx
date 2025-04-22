@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Truck, Bell, LogOut, User } from 'lucide-react';
 import NotificationComponent from './NotificationContext';
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
+
 const Header = () => {
   const [managerName, setManagerName] = useState('Manager');
   const [loading, setLoading] = useState(true);
