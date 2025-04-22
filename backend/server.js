@@ -29,12 +29,12 @@ app.use((req, res, next) => {
     next();
   }
 });
+// Update your CORS configuration
 app.use(cors({
-  origin: '*',
-  methods: '*',
-  allowedHeaders: '*',  // Allow any header
-  exposedHeaders: '*',  // Expose all headers
-  credentials: true 
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://hannahpohmah.github.io'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-auth-token'],
+  credentials: true
 }));
 app.use(express.json());
 
