@@ -52,12 +52,16 @@ const LoginCard = () => {
 
         // Redirect to App page after showing success message
         setTimeout(() => {
-          console.log('Redirecting to app...');
-          const baseUrl = window.location.pathname.includes('FleetManager_React_WebApp') 
-            ? '/FleetManager_React_WebApp/' 
-            : '/';
+          // Get the current URL
+          const currentUrl = window.location.href;
+          
+          // Extract the base part (everything before the hash)
+          const baseUrl = currentUrl.split('#')[0];
+          
+          // Redirect to the app route
           window.location.href = `${baseUrl}#/app`;
-          console.log('Redirect attempted to:', `${baseUrl}#/app`);
+          
+          console.log('Redirecting to:', `${baseUrl}#/app`);
         }, 2000);
       } else {
         // Handle login failure
