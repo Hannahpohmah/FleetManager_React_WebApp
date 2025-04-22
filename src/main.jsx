@@ -13,7 +13,7 @@ const PrivateRoute = ({ children }) => {
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <Router >
+    <Router basename="/FleetManager_React_WebApp">
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route 
