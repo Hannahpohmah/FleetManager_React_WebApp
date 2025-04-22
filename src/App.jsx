@@ -75,7 +75,7 @@ const App = () => {
   // Navigation items with enhanced icons and labels
   const navItems = [
     { id: 'upload', icon: Upload, label: 'Upload Data', description: 'Import Logistics related data' },
-    { id: 'map', icon: MapPin, label: 'Route Map', description: 'View Routes and Track driver' },
+    { id: 'map', icon: MapPin, label: 'Route Map', description: 'View Routes and Track drivers' },
     { id: 'drivers', icon: Users, label: 'Manage Drivers', description: 'Add and update driver information' },
     { id: 'routes', icon: Route, label: 'Route History', description: 'Review past delivery routes' },
     // Add the optimizer results tab if we have results

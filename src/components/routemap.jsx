@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Loader, AlertCircle, MapIcon, Car } from 'lucide-react';
 
-const RouteMap = ({ routes = [], driverLocations = [] }) => {
+const RouteMap = ({ routes = [],driverLocations = [] }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [mapData, setMapData] = useState([]);
