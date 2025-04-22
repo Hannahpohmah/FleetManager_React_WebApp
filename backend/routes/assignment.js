@@ -2,7 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import Assignment from '../models/Assignments.js';
 import Driver from '../models/Driver.js';
-import auth from '../../src/middleware/auth.js';
+import auth from '../middleware/auth.js';
 
 const router = express.Router();
 

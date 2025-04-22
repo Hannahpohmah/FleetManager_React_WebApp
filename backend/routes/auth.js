@@ -2,7 +2,7 @@
 import express from 'express';
 import FleetManager from '../models/fleetManager.js';
 import { check, validationResult } from 'express-validator';
-import auth from '../../src/middleware/auth.js';
+import auth from '../middleware/auth.js';
 
 const router = express.Router();
 

@@ -8,7 +8,7 @@ import { PythonShell } from 'python-shell';
 import { v4 as uuidv4 } from 'uuid'; // For generating unique IDs
 import OptimizationResult from '../models/allocation.js';
 import RouteResult from '../models/routes_optimized.js'; 
-import auth from '../../src/middleware/auth.js';
+import auth from '../middleware/auth.js';
 const router = express.Router();
 
 // Configure multer for file uploads
