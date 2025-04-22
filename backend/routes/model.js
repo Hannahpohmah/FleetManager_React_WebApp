@@ -327,11 +327,11 @@ const optimizeRoutesWithPython = async (req, sources, destinations, customerData
   
   return new Promise((resolve, reject) => {
     const options = {
-      mode: 'text',
-      pythonPath: 'C:\\Users\\Pohmahmbuh Hannah\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
-      scriptPath: path.join(process.cwd(), 'python_scripts'),
-      args: ['optimize', dataPath]
-    };
+    mode: 'text',
+    pythonPath: 'python', // Use system Python on Render
+    scriptPath: path.join(process.cwd(), 'python_scripts'),
+    args: ['optimize', dataPath]
+  };
 
     console.log(`Starting Python optimization script with options: ${JSON.stringify(options)}`);
     
@@ -1131,11 +1131,11 @@ const processRoutePair = (source, destination, isMultiDestination = false) => {
     fs.writeFileSync(dataPath, JSON.stringify(dataToWrite));
     
     const options = {
-      mode: 'text',
-      pythonPath: 'C:\\Users\\Pohmahmbuh Hannah\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
-      scriptPath: path.join(process.cwd(), 'python_scripts'),
-      args: ['find_route', dataPath]
-    };
+    mode: 'text',
+    pythonPath: 'python', // Use system Python on Render
+    scriptPath: path.join(process.cwd(), 'python_scripts'),
+    args: ['optimize', dataPath]
+  };
     
     let pyshell = new PythonShell('./app.py', options);
     let resultFound = false;
