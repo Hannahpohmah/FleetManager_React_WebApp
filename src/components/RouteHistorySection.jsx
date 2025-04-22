@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import axios from 'axios';
 
-// CSS-in-JS styling using Tailwind classes instead of object syntax
 const FlippableHistoryPage = () => {
   const [showRouteHistory, setShowRouteHistory] = useState(true);
   const [routeHistory, setRouteHistory] = useState([]);
@@ -27,7 +26,6 @@ const FlippableHistoryPage = () => {
         // Use the correct API base URL for your environment
         const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
 
-        
         // Fetch data sequentially to better identify issues
         console.log('Fetching route history...');
         const routeResponse = await axios.get(`${API_BASE_URL}/api/route_history`, { headers });
@@ -131,24 +129,37 @@ const FlippableHistoryPage = () => {
     return `Job-${month}${day}-${shortId}`;
   };
 
-  // Count unique source-destination pairs from route results
+  // Count routes and gather metrics from route results
   const getRouteInfo = (route) => {
+    // Initialize counters and metrics
+    let totalDistance = 0;
     let routeCount = 0;
     let uniqueDestinations = new Set();
     let uniqueSources = new Set();
     let uniqueCustomers = new Set();
     
-    // First check if results and routes exist
-    if (route.results && route.results.routes) {
-      // Count each source-destination pair in the routes
+    // Process results if they exist
+    if (route.results && route.results.routes && Array.isArray(route.results.routes)) {
+      // Count actual route objects in the results
+      routeCount = route.results.routes.length;
+      
+      // Sum total distance and collect sources/destinations
       route.results.routes.forEach(r => {
-        uniqueSources.add(r.source);
+        // Add distance
+        totalDistance += r.distance || 0;
+        
+        // Count sources
+        if (r.source) {
+          uniqueSources.add(r.source);
+        }
+        
+        // Count direct destinations
         if (r.destination) {
-          routeCount += 1;
           uniqueDestinations.add(r.destination);
         }
+        
+        // Count array destinations
         if (r.destinations && Array.isArray(r.destinations)) {
-          routeCount += r.destinations.length;
           r.destinations.forEach(d => uniqueDestinations.add(d));
         }
       });
@@ -163,18 +174,26 @@ const FlippableHistoryPage = () => {
       });
     }
     
+    // Format execution time
     let executionTimeText = '';
     if (route.executionTime) {
       executionTimeText = `${(route.executionTime / 1000).toFixed(2)} seconds`;
     }
     
+    // Format total distance
+    const formattedDistance = totalDistance > 0 
+      ? `${(totalDistance / 1000).toFixed(2)} km` 
+      : '';
+    
     return {
       routeCount: routeCount || 0,
-      sourceCount: uniqueSources.size,
-      destinationCount: uniqueDestinations.size,
+      sourceCount: uniqueSources.size || route.results?.sourceCount || 0,
+      destinationCount: uniqueDestinations.size || route.results?.destinationCount || 0,
       executionTimeText,
       skippedPairs: route.skippedPairs || 0,
-      customerCount: uniqueCustomers.size || (route.customers ? route.customers.length : 0)
+      customerCount: uniqueCustomers.size || (route.customers ? route.customers.length : 0),
+      totalDistance: totalDistance,
+      formattedDistance
     };
   };
 
@@ -229,7 +248,7 @@ const FlippableHistoryPage = () => {
       <div className="space-y-4">
         {paginatedRoutes.length > 0 ? (
           paginatedRoutes.map((route) => {
-            const { routeCount, sourceCount, destinationCount, executionTimeText, skippedPairs, customerCount } = getRouteInfo(route);
+            const { routeCount, formattedDistance, executionTimeText, skippedPairs, customerCount } = getRouteInfo(route);
             const friendlyJobName = generateFriendlyJobName(route.jobId, route.createdAt);
             
             return (
@@ -255,15 +274,14 @@ const FlippableHistoryPage = () => {
                       </p>
                     )}
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
-                        {sourceCount} Source{sourceCount !== 1 ? 's' : ''}
-                      </span>
-                      <span className="text-xs bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full">
-                        {destinationCount} Destination{destinationCount !== 1 ? 's' : ''}
-                      </span>
                       <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
                         {routeCount} Route{routeCount !== 1 ? 's' : ''}
                       </span>
+                      {formattedDistance && (
+                        <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                          {formattedDistance} total
+                        </span>
+                      )}
                       {skippedPairs > 0 && (
                         <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full">
                           {skippedPairs} Skipped
@@ -348,7 +366,7 @@ const FlippableHistoryPage = () => {
       <div className="space-y-4">
         {paginatedOptimizations.length > 0 ? (
           paginatedOptimizations.map((optimization) => {
-            const { sourceCount, destinationCount, allocationCount, customerCount, executionTimeText } = 
+            const { allocationCount, customerCount, executionTimeText } = 
               getOptimizationInfo(optimization);
             
             // Create friendly job identifier
@@ -377,20 +395,14 @@ const FlippableHistoryPage = () => {
                     )}
                     
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
-                        {sourceCount} Source{sourceCount !== 1 ? 's' : ''}
-                      </span>
-                      <span className="text-xs bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full">
-                        {destinationCount} Destination{destinationCount !== 1 ? 's' : ''}
-                      </span>
-                      {customerCount > 0 && (
-                        <span className="text-xs bg-teal-100 text-teal-800 px-2 py-1 rounded-full">
-                          {customerCount} Customer{customerCount !== 1 ? 's' : ''}
-                        </span>
-                      )}
                       {allocationCount > 0 && (
                         <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">
                           {allocationCount} Allocation{allocationCount !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {customerCount > 0 && (
+                        <span className="text-xs bg-teal-100 text-teal-800 px-2 py-1 rounded-full">
+                          {customerCount} Customer{customerCount !== 1 ? 's' : ''}
                         </span>
                       )}
                       {executionTimeText && (
