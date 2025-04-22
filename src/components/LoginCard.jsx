@@ -52,7 +52,9 @@ const LoginCard = () => {
 
         // Redirect to App page after showing success message
         setTimeout(() => {
-          window.location.href = 'https://hannahpohmah.github.io/FleetManager_React_WebApp/#/app';
+          console.log('Current location before redirect:', window.location.href);
+          window.location.replace('#/app');
+          console.log('Attempted redirect to:', '#/app');
         }, 2000);
       } else {
         // Handle login failure
