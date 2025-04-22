@@ -19,7 +19,7 @@ const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
 export const OptimizationContext = React.createContext();
 
 const App = () => {
-  const [activeTab, setActiveTab] = useState('map');
+  const [activeTab, setActiveTab] = useState('upload');
   const [currentLocation, setCurrentLocation] = useState(null);
   const [routes, setRoutes] = useState([]);
   const [directions, setDirections] = useState(null);
