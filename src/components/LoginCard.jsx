@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ReactCardFlip from 'react-card-flip';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -7,6 +8,7 @@ import { User, Key, AlertCircle, CheckCircle, Mail } from 'lucide-react';
 const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
 
 const LoginCard = () => {
+  const navigate = useNavigate();
   const [isFlipped, setIsFlipped] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -50,11 +52,16 @@ const LoginCard = () => {
         localStorage.setItem('userEmail', data.manager.email);
         localStorage.setItem('username', data.manager.username);
 
-        // Redirect to App page after showing success message
+        // Redirect to App page after showing success message using the correct route for GitHub Pages
         setTimeout(() => {
-          console.log('Current location before redirect:', window.location.href);
-          window.location.replace('#/app');
-          console.log('Attempted redirect to:', '#/app');
+          console.log('Redirecting to app page');
+          navigate('/app');
+          
+          // If the navigation doesn't work properly due to GitHub Pages base path,
+          // we can try a direct URL approach as a fallback
+          if (window.location.href.includes('github.io')) {
+            window.location.href = '/FleetManager_React_WebApp/#/app';
+          }
         }, 2000);
       } else {
         // Handle login failure
