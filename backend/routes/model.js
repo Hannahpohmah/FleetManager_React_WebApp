@@ -327,60 +327,73 @@ const optimizeRoutesWithPython = async (req, sources, destinations, customerData
   
   return new Promise((resolve, reject) => {
     const options = {
-    mode: 'text',
-    pythonPath: 'python', // Use system Python on Render
-    scriptPath: path.join(process.cwd(), 'python_scripts'),
-    args: ['optimize', dataPath]
-  };
+      mode: 'text',
+      pythonPath: 'python', // Use system Python on Render
+      scriptPath: path.join(process.cwd(), 'python_scripts'),
+      args: ['optimize', dataPath]
+    };
 
     console.log(`Starting Python optimization script with options: ${JSON.stringify(options)}`);
     
-    // Create PythonShell with stderr capturing
+    // Create PythonShell with stdout capturing
     let pyshell = new PythonShell('./app.py', options);
-    let stderrOutput = [];
+    let stdoutOutput = [];
     
-    // Capture stderr
+    // Capture stdout - this is where our results are
+    pyshell.on('message', (message) => {
+      console.log(`Python stdout: ${message}`);
+      stdoutOutput.push(message);
+      
+      // Look for the Route Result in the stdout
+      if (message.includes('Route Result:')) {
+        try {
+          // Extract the JSON part from the output
+          const jsonStart = message.indexOf('{');
+          const jsonEnd = message.lastIndexOf('}') + 1;
+          
+          if (jsonStart >= 0 && jsonEnd > jsonStart) {
+            const jsonStr = message.substring(jsonStart, jsonEnd);
+            const jsonObj = JSON.parse(jsonStr);
+            
+            if (jsonObj.allocations) {
+              console.log('Found complete JSON result in stdout');
+              
+              // Process customer data
+              jsonObj.allocations = mergeCustomerDataWithAllocations(
+                jsonObj.allocations, 
+                sources,
+                destinations
+              );
+              
+              // Extract customer data from enhanced allocations
+              const customerData = extractCustomerData(jsonObj.allocations);
+              
+              // Update the database record with the results
+              updateDatabaseRecord(
+                {...jsonObj, destination_customer: customerData}, 
+                jobId, 
+                startTime, 
+                fleetManagerId, 
+                destinations
+              )
+              .then(() => resolve(jsonObj))
+              .catch(err => {
+                console.error(`Error updating database: ${err.message}`);
+                resolve(jsonObj);
+              });
+            }
+          }
+        } catch (e) {
+          console.error(`Error extracting JSON from stdout: ${e.message}`);
+        }
+      }
+    });
+
+    // Still capture stderr for error reporting
     pyshell.stderr.on('data', (data) => {
       const dataStr = data.toString();
-      console.log(`Python stderr: ${dataStr}`);
-      stderrOutput.push(dataStr);
-      
-      // Look for the final JSON result in real-time
-      try {
-        // Check if this chunk contains a complete JSON object
-        if (dataStr.trim().startsWith('{') && dataStr.trim().endsWith('}')) {
-          const jsonObj = JSON.parse(dataStr.trim());
-          if (jsonObj.allocations) {
-            console.log('Found complete JSON result in stderr');
-            
-            // Process customer data only if not already processed
-            jsonObj.allocations = mergeCustomerDataWithAllocations(
-              jsonObj.allocations, 
-              sources,
-              destinations
-            );
-            
-            // Extract customer data from enhanced allocations
-            const customerData = extractCustomerData(jsonObj.allocations);
-            
-            // Update the database record with the results - using upsert to handle potential duplicates
-            updateDatabaseRecord(
-              {...jsonObj, destination_customer: customerData}, 
-              jobId, 
-              startTime, 
-              fleetManagerId, 
-              destinations
-            )
-            .then(() => resolve(jsonObj))
-            .catch(err => {
-              console.error(`Error updating database: ${err.message}`);
-              resolve(jsonObj);
-            });
-          }
-        }
-      } catch (e) {
-        // Not a complete JSON object, continue collecting output
-      }
+      console.error(`Python stderr: ${dataStr}`);
+      // We're not looking for results here anymore
     });
 
     // Handle completion
@@ -402,81 +415,74 @@ const optimizeRoutesWithPython = async (req, sources, destinations, customerData
         return;
       }
       
-      // If we didn't find a complete JSON object during streaming,
-      // try to find the final result in the complete stderr output
-      const stderrText = stderrOutput.join('');
+      // If we reach here and haven't resolved yet, check the collected stdout
+      const completeOutput = stdoutOutput.join('\n');
+      const resultLines = completeOutput.split('\n')
+        .filter(line => line.includes('Route Result:'));
       
-      try {
-        // First try to find the complete JSON object at the end
-        const jsonLines = stderrText.split('\n')
-          .filter(line => line.trim().startsWith('{') && line.trim().endsWith('}'));
-        
-        if (jsonLines.length > 0) {
-          // Take the last JSON object (most likely the final result)
-          const lastJsonLine = jsonLines[jsonLines.length - 1];
-          const jsonObj = JSON.parse(lastJsonLine);
-          if (jsonObj.allocations) {
-            console.log('Found JSON result at the end of stderr');
+      if (resultLines.length > 0) {
+        // Process the last result line (most recent)
+        const lastResult = resultLines[resultLines.length - 1];
+        try {
+          const jsonStart = lastResult.indexOf('{');
+          const jsonEnd = lastResult.lastIndexOf('}') + 1;
+          
+          if (jsonStart >= 0 && jsonEnd > jsonStart) {
+            const jsonStr = lastResult.substring(jsonStart, jsonEnd);
+            const jsonObj = JSON.parse(jsonStr);
             
-            // Process customer data only if not already processed
-            jsonObj.allocations = mergeCustomerDataWithAllocations(
-              jsonObj.allocations, 
-              sources,
-              destinations
-            );
-            
-            // Extract customer data from enhanced allocations
-            const customerData = extractCustomerData(jsonObj.allocations);
-            
-            // Update the database record with the results
-            updateDatabaseRecord(
-              {...jsonObj, destination_customer: customerData}, 
-              jobId, 
-              startTime, 
-              fleetManagerId, 
-              destinations
-            )
-            .then(() => resolve(jsonObj))
-            .catch(err => {
-              console.error(`Error updating database: ${err.message}`);
-              resolve(jsonObj);
-            });
-            
-            return;
+            if (jsonObj.allocations) {
+              console.log('Found JSON result in collected stdout');
+              
+              // Process customer data
+              jsonObj.allocations = mergeCustomerDataWithAllocations(
+                jsonObj.allocations, 
+                sources,
+                destinations
+              );
+              
+              // Extract customer data from enhanced allocations
+              const customerData = extractCustomerData(jsonObj.allocations);
+              
+              // Update the database record
+              updateDatabaseRecord(
+                {...jsonObj, destination_customer: customerData}, 
+                jobId, 
+                startTime, 
+                fleetManagerId, 
+                destinations
+              )
+              .then(() => resolve(jsonObj))
+              .catch(err => {
+                console.error(`Error updating database: ${err.message}`);
+                resolve(jsonObj);
+              });
+              
+              return;
+            }
           }
+        } catch (error) {
+          console.error(`Error processing collected stdout: ${error.message}`);
         }
-        
-        console.error('Could not find valid JSON result in stderr');
-        
-        // Update the database record with failure status
-        updateDatabaseRecord(
-          { error: 'No valid JSON found' }, 
-          jobId, 
-          startTime, 
-          fleetManagerId, 
-          destinations, 
-          'failed'
-        ).catch(dbErr => console.error(`Error updating database with failure: ${dbErr.message}`));
-        
-        reject(new Error('No valid JSON found in Python stderr output'));
-      } catch (error) {
-        console.error(`Error processing Python stderr: ${error.message}`);
-        
-        // Update the database record with failure status
-        updateDatabaseRecord(
-          { error: error.message }, 
-          jobId, 
-          startTime, 
-          fleetManagerId, 
-          destinations, 
-          'failed'
-        ).catch(dbErr => console.error(`Error updating database with failure: ${dbErr.message}`));
-        
-        reject(error);
       }
+      
+      console.error('Could not find valid JSON result in stdout');
+      
+      // Update the database record with failure status
+      updateDatabaseRecord(
+        { error: 'No valid JSON found in stdout' }, 
+        jobId, 
+        startTime, 
+        fleetManagerId, 
+        destinations, 
+        'failed'
+      ).catch(dbErr => console.error(`Error updating database with failure: ${dbErr.message}`));
+      
+      reject(new Error('No valid JSON found in Python stdout output'));
     });
   });
 };
+
 // Modify updateDatabaseRecord to rely on destination_customer from enhanced allocations
 async function updateDatabaseRecord(resultData, jobId, startTime, fleetManagerId, destinations = [], status = 'completed') {
   // Validate input
