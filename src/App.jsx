@@ -14,7 +14,6 @@ import OptimizerResults from './components/optimizer_result';
 
 const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
 
-
 // Create a context for sharing optimization results across components
 export const OptimizationContext = React.createContext();
 
@@ -28,8 +27,9 @@ const App = () => {
   // Add state for optimization results
   const [optimizationResults, setOptimizationResults] = useState(null);
   
-  // Get current location
+  // Get current location and load persisted data
   useEffect(() => {
+    // Get geolocation
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -44,7 +44,7 @@ const App = () => {
       );
     }
     
-    // Load any existing optimization results from sessionStorage on initial load
+    // Load any existing routes from sessionStorage
     const storedRoutes = sessionStorage.getItem('appRoutes');
     if (storedRoutes) {
       try {
@@ -54,6 +54,25 @@ const App = () => {
       } catch (err) {
         console.error('Error loading routes from sessionStorage:', err);
       }
+    }
+
+    // Load optimization results from sessionStorage or localStorage
+    const storedResults = sessionStorage.getItem('optimizationResults') || 
+                          localStorage.getItem('optimizationResults');
+    if (storedResults) {
+      try {
+        const parsedResults = JSON.parse(storedResults);
+        setOptimizationResults(parsedResults);
+        console.log('Loaded optimization results from storage', parsedResults);
+      } catch (err) {
+        console.error('Error loading optimization results from storage:', err);
+      }
+    }
+
+    // Load active tab from sessionStorage
+    const storedActiveTab = sessionStorage.getItem('activeTab');
+    if (storedActiveTab) {
+      setActiveTab(storedActiveTab);
     }
   }, []);
 
@@ -73,50 +92,70 @@ const App = () => {
     }
   };
 
-  // Navigation items with enhanced icons and labels
-  const navItems = [
-    { id: 'upload', icon: Upload, label: 'Upload Data', description: 'Import Logistics related data' },
-    { id: 'map', icon: MapPin, label: 'Route Map', description: 'View Routes and Track drivers' },
-    { id: 'drivers', icon: Users, label: 'Manage Drivers', description: 'Add and update driver information' },
-    { id: 'routes', icon: Route, label: 'Route History', description: 'Review past delivery routes' },
-    // Add the optimizer results tab if we have results
-    ...(optimizationResults && (
+  // Build navigation items dynamically based on current state
+  const buildNavItems = () => {
+    // Base navigation items
+    const items = [
+      { id: 'upload', icon: Upload, label: 'Upload Data', description: 'Import Logistics related data' },
+      { id: 'map', icon: MapPin, label: 'Route Map', description: 'View Routes and Track drivers' },
+      { id: 'drivers', icon: Users, label: 'Manage Drivers', description: 'Add and update driver information' },
+      { id: 'routes', icon: Route, label: 'Route History', description: 'Review past delivery routes' },
+    ];
+
+    // Add optimizer results tab if we have results
+    if (optimizationResults && (
       (optimizationResults.allocations && optimizationResults.allocations.length > 0) || 
       (Array.isArray(optimizationResults) && optimizationResults.length > 0) ||
       (optimizationResults.routes && optimizationResults.routes.length > 0)
-    ) ? [{ id: 'optimizer_result', icon: FileSpreadsheet, label: 'Allocation Results', description: 'View Inventory allocations' }] : []),
-    // Add the route results tab if we have results with routes
-    ...(optimizationResults && (
+    )) {
+      items.push({ 
+        id: 'optimizer_result', 
+        icon: FileSpreadsheet, 
+        label: 'Allocation Results', 
+        description: 'View Inventory allocations' 
+      });
+    }
+
+    // Add route results tab if we have results with routes
+    if (optimizationResults && (
       (optimizationResults.routes && optimizationResults.routes.length > 0) ||
       (optimizationResults.results && optimizationResults.results.routes && optimizationResults.results.routes.length > 0)
-    ) ? [{ id: 'Route_Result', icon: Navigation, label: 'Route Results', description: 'View optimized route details' }] : [])
-  ];
+    )) {
+      items.push({ 
+        id: 'Route_Result', 
+        icon: Navigation, 
+        label: 'Route Results', 
+        description: 'View optimized route details' 
+      });
+    }
 
-  // Dashboard stats (these will be replaced by the actual fetched values in Sidebar)
+    return items;
+  };
+
+  // Dashboard stats
   const dashboardStats = [
     { title: 'Active Routes', value: 12, icon: Route, color: '#3b82f6' },
     { title: 'Available Drivers', value: 8, icon: Users, color: '#10b981' },
     { title: 'Pending Deliveries', value: 24, icon: BarChart3, color: '#f59e0b' },
   ];
+
   const updateRoutes = (newRoutes) => {
     console.log('Updating routes in App.jsx', newRoutes);
     setRoutes(newRoutes);
-    // Save to sessionStorage for persistence if needed
+    // Save to sessionStorage for persistence
     sessionStorage.setItem('appRoutes', JSON.stringify(newRoutes));
   };
 
+  // Get navigation items
+  const navItems = buildNavItems();
+  
   // Get the active tab configuration
   const activeTabConfig = navItems.find(item => item.id === activeTab) || navItems[0];
+  
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     sessionStorage.setItem('activeTab', tab);
   };
-  useEffect(() => {
-    const storedActiveTab = sessionStorage.getItem('activeTab');
-    if (storedActiveTab) {
-      setActiveTab(storedActiveTab);
-    }
-  }, []); // Empty dependency array to run once on component mount
   
   return (
     <OptimizationContext.Provider value={{ optimizationResults, updateOptimizationResults }}>
@@ -130,7 +169,7 @@ const App = () => {
             <div>
               <Sidebar 
                 activeTab={activeTab} 
-                setActiveTab={setActiveTab} 
+                setActiveTab={handleTabChange} 
                 navItems={navItems} 
                 dashboardStats={dashboardStats} 
               />
@@ -161,7 +200,7 @@ const App = () => {
                   {activeTab === 'upload' && (
                     <UploadSection 
                       setRoutes={setRoutes} 
-                      setActiveTab={setActiveTab}
+                      setActiveTab={handleTabChange}
                       updateOptimizationResults={updateOptimizationResults}
                     />
                   )}
@@ -175,31 +214,13 @@ const App = () => {
                   )}
                   {activeTab === 'Route_Result' && (
                     <RouteResults 
-                      setActiveTab={setActiveTab} 
+                      setActiveTab={handleTabChange} 
                       optimizationResults={optimizationResults}
                       updateRoutes={updateRoutes}
                     />
                   )}
                   {activeTab === 'optimizer_result' && (
-                    <OptimizerResults setActiveTab={setActiveTab} />
-                  )}
-                  
-                  {/* Invisible instance of OptimizerResults that's always rendered to maintain state */}
-                  {optimizationResults && activeTab !== 'optimizer_result' && (
-                    <div style={{ display: 'none' }}>
-                      <OptimizerResults setActiveTab={setActiveTab} />
-                    </div>
-                  )}
-                  
-                  {/* Invisible instance of RouteResults that's always rendered to maintain state */}
-                  {optimizationResults && activeTab !== 'Route_Result' && (
-                    <div style={{ display: 'none' }}>
-                      <RouteResults 
-                        setActiveTab={setActiveTab} 
-                        optimizationResults={optimizationResults}
-                        updateRoutes={updateRoutes} // Add this prop here too
-                      />
-                    </div>
+                    <OptimizerResults setActiveTab={handleTabChange} />
                   )}
                 </div>
               </div>
