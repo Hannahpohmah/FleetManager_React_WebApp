@@ -1133,7 +1133,9 @@ const processRoutePair = (source, destination, isMultiDestination = false) => {
     let pyshell = new PythonShell('./app.py', options);
     let resultFound = false;
     let stdoutBuffer = ''; // Buffer to accumulate stdout output
+    let stderrBuffer = ''; // Buffer to accumulate stderr output
     
+    // Process stdout data
     pyshell.stdout.on('data', (data) => {
       if (resultFound) return;
       const dataStr = data.toString();
@@ -1142,13 +1144,40 @@ const processRoutePair = (source, destination, isMultiDestination = false) => {
       // Accumulate stdout data
       stdoutBuffer += dataStr;
       
+      // Try to parse the entire buffer as JSON
+      try {
+        const jsonObj = JSON.parse(stdoutBuffer.trim());
+        console.log('Found JSON in stdout');
+        
+        // Mark that we found a result to avoid further processing
+        resultFound = true;
+        
+        // Clean up the temp file
+        try { fs.unlinkSync(dataPath); } catch (e) { /* ignore */ }
+        
+        resolve(jsonObj);
+        return;
+      } catch (e) {
+        // Not valid JSON yet, continue accumulating
+      }
+    });
+    
+    // Original stderr processing
+    pyshell.stderr.on('data', (data) => {
+      if (resultFound) return;
+      const dataStr = data.toString();
+      console.log(`Python stderr: ${dataStr}`);
+      
+      // Accumulate stderr data
+      stderrBuffer += dataStr;
+      
       // Specifically look for "Route Result:" marker followed by JSON
       if (dataStr.includes('Route Result:')) {
         // Try to extract the JSON after "Route Result:"
-        const routeResultIndex = stdoutBuffer.lastIndexOf('Route Result:');
+        const routeResultIndex = stderrBuffer.lastIndexOf('Route Result:');
         if (routeResultIndex !== -1) {
           const jsonStartIndex = routeResultIndex + 'Route Result:'.length;
-          const jsonString = stdoutBuffer.substring(jsonStartIndex).trim();
+          const jsonString = stderrBuffer.substring(jsonStartIndex).trim();
           
           // Try to parse the JSON
           try {
@@ -1171,11 +1200,6 @@ const processRoutePair = (source, destination, isMultiDestination = false) => {
       }
     });
     
-    // Still monitor stderr for errors, but don't try to parse results from it
-    pyshell.stderr.on('data', (data) => {
-      console.log(`Python stderr: ${data.toString()}`);
-    });
-    
     pyshell.end((err) => {
       // Clean up temp file if not already done
       try { fs.unlinkSync(dataPath); } catch (e) { /* ignore */ }
@@ -1184,15 +1208,26 @@ const processRoutePair = (source, destination, isMultiDestination = false) => {
       if (resultFound) return;
       
       if (err) {
+        console.log('Python error:', err);
         reject(err);
         return;
       }
       
-      // Try one more time with the complete buffer
+      // Try to parse complete stdout buffer as JSON first
+      try {
+        const jsonObj = JSON.parse(stdoutBuffer.trim());
+        console.log('Successfully parsed complete stdout as JSON');
+        resolve(jsonObj);
+        return;
+      } catch (stdoutErr) {
+        console.log('Final stdout JSON parsing error:', stdoutErr.message);
+      }
+      
+      // Try with stderr as fallback
       try {
         // Look for Route Result: followed by JSON
         const routeResultRegex = /Route Result:\s*(\{[\s\S]*\})/;
-        const resultMatch = stdoutBuffer.match(routeResultRegex);
+        const resultMatch = stderrBuffer.match(routeResultRegex);
         
         if (resultMatch && resultMatch[1]) {
           const jsonStr = resultMatch[1];
@@ -1201,8 +1236,14 @@ const processRoutePair = (source, destination, isMultiDestination = false) => {
           resolve(jsonObj);
           return;
         }
-      } catch (e) {
-        console.log('Final JSON parsing error:', e.message);
+        
+        // If no Route Result prefix, try the entire stderr as JSON
+        const jsonObj = JSON.parse(stderrBuffer.trim());
+        console.log('Successfully parsed complete stderr as JSON');
+        resolve(jsonObj);
+        return;
+      } catch (stderrErr) {
+        console.log('Final stderr JSON parsing error:', stderrErr.message);
       }
       
       // If we got here and haven't found a result yet, that's an error
