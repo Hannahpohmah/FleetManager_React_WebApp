@@ -14,6 +14,7 @@ import OptimizerResults from './components/optimizer_result';
 
 const API_BASE_URL = 'https://fleetmanager-react-webapp.onrender.com';
 
+
 // Create a context for sharing optimization results across components
 export const OptimizationContext = React.createContext();
 
@@ -27,7 +28,7 @@ const App = () => {
   // Add state for optimization results
   const [optimizationResults, setOptimizationResults] = useState(null);
   
-  // Get current location and restore saved state
+  // Get current location
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -43,19 +44,7 @@ const App = () => {
       );
     }
     
-    // Load any existing optimization results from sessionStorage or localStorage on initial load
-    const storedOptResults = localStorage.getItem('optimizationResults') || sessionStorage.getItem('optimizationResults');
-    if (storedOptResults) {
-      try {
-        const parsedResults = JSON.parse(storedOptResults);
-        console.log('Loaded optimization results from storage', parsedResults);
-        setOptimizationResults(parsedResults);
-      } catch (err) {
-        console.error('Error loading optimization results from storage:', err);
-      }
-    }
-    
-    // Load any existing routes from sessionStorage on initial load
+    // Load any existing optimization results from sessionStorage on initial load
     const storedRoutes = sessionStorage.getItem('appRoutes');
     if (storedRoutes) {
       try {
@@ -66,12 +55,6 @@ const App = () => {
         console.error('Error loading routes from sessionStorage:', err);
       }
     }
-    
-    // Load the active tab from sessionStorage
-    const storedActiveTab = sessionStorage.getItem('activeTab');
-    if (storedActiveTab) {
-      setActiveTab(storedActiveTab);
-    }
   }, []);
 
   // Function to update optimization results
@@ -79,7 +62,7 @@ const App = () => {
     console.log('Updating optimization results in App.jsx', results);
     setOptimizationResults(results);
     
-    // Also save to sessionStorage and localStorage for persistence across page refreshes
+    // Also save to sessionStorage for persistence across page refreshes
     if (results) {
       sessionStorage.setItem('optimizationResults', JSON.stringify(results));
       localStorage.setItem('optimizationResults', JSON.stringify(results));
@@ -90,55 +73,31 @@ const App = () => {
     }
   };
 
-  // Create a function that determines if the navigation should include the optimizer and route results
-  const getNavItems = () => {
-    const baseNavItems = [
-      { id: 'upload', icon: Upload, label: 'Upload Data', description: 'Import Logistics related data' },
-      { id: 'map', icon: MapPin, label: 'Route Map', description: 'View Routes and Track drivers' },
-      { id: 'drivers', icon: Users, label: 'Manage Drivers', description: 'Add and update driver information' },
-      { id: 'routes', icon: Route, label: 'Route History', description: 'Review past delivery routes' },
-    ];
-    
-    // Only add the optimizer results tab if we have valid results
-    if (optimizationResults && (
+  // Navigation items with enhanced icons and labels
+  const navItems = [
+    { id: 'upload', icon: Upload, label: 'Upload Data', description: 'Import Logistics related data' },
+    { id: 'map', icon: MapPin, label: 'Route Map', description: 'View Routes and Track drivers' },
+    { id: 'drivers', icon: Users, label: 'Manage Drivers', description: 'Add and update driver information' },
+    { id: 'routes', icon: Route, label: 'Route History', description: 'Review past delivery routes' },
+    // Add the optimizer results tab if we have results
+    ...(optimizationResults && (
       (optimizationResults.allocations && optimizationResults.allocations.length > 0) || 
       (Array.isArray(optimizationResults) && optimizationResults.length > 0) ||
       (optimizationResults.routes && optimizationResults.routes.length > 0)
-    )) {
-      baseNavItems.push({ 
-        id: 'optimizer_result', 
-        icon: FileSpreadsheet, 
-        label: 'Allocation Results', 
-        description: 'View Inventory allocations' 
-      });
-    }
-    
-    // Only add the route results tab if we have valid routes
-    if (optimizationResults && (
+    ) ? [{ id: 'optimizer_result', icon: FileSpreadsheet, label: 'Allocation Results', description: 'View Inventory allocations' }] : []),
+    // Add the route results tab if we have results with routes
+    ...(optimizationResults && (
       (optimizationResults.routes && optimizationResults.routes.length > 0) ||
       (optimizationResults.results && optimizationResults.results.routes && optimizationResults.results.routes.length > 0)
-    )) {
-      baseNavItems.push({ 
-        id: 'Route_Result', 
-        icon: Navigation, 
-        label: 'Route Results', 
-        description: 'View optimized route details' 
-      });
-    }
-    
-    return baseNavItems;
-  };
+    ) ? [{ id: 'Route_Result', icon: Navigation, label: 'Route Results', description: 'View optimized route details' }] : [])
+  ];
 
-  // Get the navigation items with dynamic tabs
-  const navItems = getNavItems();
-
-  // Dashboard stats
+  // Dashboard stats (these will be replaced by the actual fetched values in Sidebar)
   const dashboardStats = [
     { title: 'Active Routes', value: 12, icon: Route, color: '#3b82f6' },
     { title: 'Available Drivers', value: 8, icon: Users, color: '#10b981' },
     { title: 'Pending Deliveries', value: 24, icon: BarChart3, color: '#f59e0b' },
   ];
-  
   const updateRoutes = (newRoutes) => {
     console.log('Updating routes in App.jsx', newRoutes);
     setRoutes(newRoutes);
@@ -148,11 +107,16 @@ const App = () => {
 
   // Get the active tab configuration
   const activeTabConfig = navItems.find(item => item.id === activeTab) || navItems[0];
-  
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     sessionStorage.setItem('activeTab', tab);
   };
+  useEffect(() => {
+    const storedActiveTab = sessionStorage.getItem('activeTab');
+    if (storedActiveTab) {
+      setActiveTab(storedActiveTab);
+    }
+  }, []); // Empty dependency array to run once on component mount
   
   return (
     <OptimizationContext.Provider value={{ optimizationResults, updateOptimizationResults }}>
@@ -166,7 +130,7 @@ const App = () => {
             <div>
               <Sidebar 
                 activeTab={activeTab} 
-                setActiveTab={handleTabChange} 
+                setActiveTab={setActiveTab} 
                 navItems={navItems} 
                 dashboardStats={dashboardStats} 
               />
@@ -197,7 +161,7 @@ const App = () => {
                   {activeTab === 'upload' && (
                     <UploadSection 
                       setRoutes={setRoutes} 
-                      setActiveTab={handleTabChange}
+                      setActiveTab={setActiveTab}
                       updateOptimizationResults={updateOptimizationResults}
                     />
                   )}
@@ -211,13 +175,31 @@ const App = () => {
                   )}
                   {activeTab === 'Route_Result' && (
                     <RouteResults 
-                      setActiveTab={handleTabChange} 
+                      setActiveTab={setActiveTab} 
                       optimizationResults={optimizationResults}
                       updateRoutes={updateRoutes}
                     />
                   )}
                   {activeTab === 'optimizer_result' && (
-                    <OptimizerResults setActiveTab={handleTabChange} />
+                    <OptimizerResults setActiveTab={setActiveTab} />
+                  )}
+                  
+                  {/* Invisible instance of OptimizerResults that's always rendered to maintain state */}
+                  {optimizationResults && activeTab !== 'optimizer_result' && (
+                    <div style={{ display: 'none' }}>
+                      <OptimizerResults setActiveTab={setActiveTab} />
+                    </div>
+                  )}
+                  
+                  {/* Invisible instance of RouteResults that's always rendered to maintain state */}
+                  {optimizationResults && activeTab !== 'Route_Result' && (
+                    <div style={{ display: 'none' }}>
+                      <RouteResults 
+                        setActiveTab={setActiveTab} 
+                        optimizationResults={optimizationResults}
+                        updateRoutes={updateRoutes} // Add this prop here too
+                      />
+                    </div>
                   )}
                 </div>
               </div>
