@@ -10,6 +10,7 @@ const FlippableHistoryPage = () => {
   const [error, setError] = useState(null);
   const [currentRoutePage, setCurrentRoutePage] = useState(0);
   const [currentOptimizationPage, setCurrentOptimizationPage] = useState(0);
+  const [expandedItems, setExpandedItems] = useState({});
   const ITEMS_PER_PAGE = 3;
 
   useEffect(() => {
@@ -106,12 +107,12 @@ const FlippableHistoryPage = () => {
     }
   };
 
-  const viewRouteDetails = (jobId) => {
-    window.location.href = `/routes/details/${jobId}`;
-  };
-
-  const viewOptimizationDetails = (optimizationId) => {
-    window.location.href = `/optimization/details/${optimizationId}`;
+  // Toggle expanded state for an item
+  const toggleExpandItem = (id) => {
+    setExpandedItems(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
   };
 
   // Generate a friendly job name from the job ID
@@ -133,16 +134,12 @@ const FlippableHistoryPage = () => {
   const getRouteInfo = (route) => {
     // Initialize counters and metrics
     let totalDistance = 0;
-    let routeCount = 0;
     let uniqueDestinations = new Set();
     let uniqueSources = new Set();
     let uniqueCustomers = new Set();
     
     // Process results if they exist
     if (route.results && route.results.routes && Array.isArray(route.results.routes)) {
-      // Count actual route objects in the results
-      routeCount = route.results.routes.length;
-      
       // Sum total distance and collect sources/destinations
       route.results.routes.forEach(r => {
         // Add distance
@@ -185,8 +182,11 @@ const FlippableHistoryPage = () => {
       ? `${(totalDistance / 1000).toFixed(2)} km` 
       : '';
     
+    // Use sourceCount from results or fallback to counting sources
+    const routeCount = route.results?.sourceCount || uniqueSources.size || 0;
+    
     return {
-      routeCount: routeCount || 0,
+      routeCount,
       sourceCount: uniqueSources.size || route.results?.sourceCount || 0,
       destinationCount: uniqueDestinations.size || route.results?.destinationCount || 0,
       executionTimeText,
@@ -239,6 +239,95 @@ const FlippableHistoryPage = () => {
     setShowRouteHistory(!showRouteHistory);
   };
 
+  // Render route details when expanded
+  const renderRouteDetails = (route) => {
+    if (!route.results || !route.results.routes) {
+      return <p className="text-sm text-gray-500 mt-2">No detailed route data available</p>;
+    }
+
+    return (
+      <div className="mt-4 border-t pt-3 text-sm">
+        <h4 className="font-medium mb-2">Route Details</h4>
+        {route.results.routes.map((r, idx) => (
+          <div key={idx} className="mb-3 pb-2 border-b border-gray-100 last:border-0">
+            <p className="font-medium">Route {idx + 1}:</p>
+            <p><span className="text-gray-600">Source:</span> {r.source}</p>
+            <p>
+              <span className="text-gray-600">Destinations:</span> {' '}
+              {r.destinations ? r.destinations.join(', ') : r.destination || 'None'}
+            </p>
+            {r.distance && (
+              <p><span className="text-gray-600">Distance:</span> {(r.distance / 1000).toFixed(2)} km</p>
+            )}
+            {r.time && (
+              <p><span className="text-gray-600">Est. Time:</span> {r.time.toFixed(2)} min</p>
+            )}
+          </div>
+        ))}
+        
+        {route.results.errors && route.results.errors.length > 0 && (
+          <div className="mt-2">
+            <p className="font-medium text-red-600">Errors:</p>
+            <ul className="list-disc list-inside">
+              {route.results.errors.map((err, idx) => (
+                <li key={idx} className="text-red-600">
+                  {err.source}: {err.error}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render allocation details when expanded
+  const renderOptimizationDetails = (optimization) => {
+    return (
+      <div className="mt-4 border-t pt-3 text-sm">
+        <h4 className="font-medium mb-2">Allocation Details</h4>
+        
+        {optimization.allocations && optimization.allocations.length > 0 ? (
+          <div>
+            <p className="font-medium mb-1">Allocations:</p>
+            {optimization.allocations.slice(0, 5).map((alloc, idx) => (
+              <div key={idx} className="mb-2 pb-2 border-b border-gray-100 last:border-0">
+                <p><span className="text-gray-600">From:</span> {alloc.source || 'Not specified'}</p>
+                <p><span className="text-gray-600">To:</span> {alloc.destination || 'Not specified'}</p>
+                {alloc.destination_customer && (
+                  <p><span className="text-gray-600">Customer:</span> {alloc.destination_customer}</p>
+                )}
+              </div>
+            ))}
+            {optimization.allocations.length > 5 && (
+              <p className="text-gray-500 italic">
+                + {optimization.allocations.length - 5} more allocations...
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-gray-500">No allocation data available</p>
+        )}
+        
+        {optimization.destination_customer && optimization.destination_customer.length > 0 && (
+          <div className="mt-3">
+            <p className="font-medium mb-1">Customer Destinations:</p>
+            {optimization.destination_customer.slice(0, 5).map((item, idx) => (
+              <p key={idx} className="mb-1">
+                <span className="text-gray-600">{item.customer}:</span> {item.destination}
+              </p>
+            ))}
+            {optimization.destination_customer.length > 5 && (
+              <p className="text-gray-500 italic">
+                + {optimization.destination_customer.length - 5} more customers...
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderRouteHistory = () => {
     const startIndex = currentRoutePage * ITEMS_PER_PAGE;
     const endIndex = startIndex + ITEMS_PER_PAGE;
@@ -250,68 +339,73 @@ const FlippableHistoryPage = () => {
           paginatedRoutes.map((route) => {
             const { routeCount, formattedDistance, executionTimeText, skippedPairs, customerCount } = getRouteInfo(route);
             const friendlyJobName = generateFriendlyJobName(route.jobId, route.createdAt);
+            const isExpanded = expandedItems[route.jobId] || false;
             
             return (
               <Card key={route.jobId} className="hover:shadow-md transition-shadow duration-200">
-                <CardContent className="flex items-center justify-between p-4">
-                  <div>
-                    <div className="flex items-center">
-                      <p className="font-medium">{friendlyJobName}</p>
-                      <span className={`ml-2 text-xs px-2 py-1 rounded-full ${
-                        route.status === 'completed' 
-                          ? 'bg-green-100 text-green-800' 
-                          : route.status === 'failed'
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {route.status.charAt(0).toUpperCase() + route.status.slice(1)}
-                      </span>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center">
+                        <p className="font-medium">{friendlyJobName}</p>
+                        <span className={`ml-2 text-xs px-2 py-1 rounded-full ${
+                          route.status === 'completed' 
+                            ? 'bg-green-100 text-green-800' 
+                            : route.status === 'failed'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {route.status.charAt(0).toUpperCase() + route.status.slice(1)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-500">Created: {formatDate(route.createdAt)}</p>
+                      {route.completedAt && (
+                        <p className="text-sm text-gray-500">
+                          Completed: {formatDate(route.completedAt)}
+                        </p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                          {routeCount} Route{routeCount !== 1 ? 's' : ''}
+                        </span>
+                        {formattedDistance && (
+                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                            {formattedDistance} total
+                          </span>
+                        )}
+                        {skippedPairs > 0 && (
+                          <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full">
+                            {skippedPairs} Skipped
+                          </span>
+                        )}
+                        {customerCount > 0 && (
+                          <span className="text-xs bg-teal-100 text-teal-800 px-2 py-1 rounded-full">
+                            {customerCount} Customer{customerCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {executionTimeText && (
+                          <span className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full">
+                            ({executionTimeText})
+                          </span>
+                        )}
+                      </div>
+                      {route.inputMethod && (
+                        <span className="mt-1 block text-xs text-gray-500">
+                          Input: {route.inputMethod.charAt(0).toUpperCase() + route.inputMethod.slice(1)}
+                          {route.inputMethod === 'file' && route.fileUpload?.originalFilename && 
+                            ` (${route.fileUpload.originalFilename})`}
+                        </span>
+                      )}
                     </div>
-                    <p className="text-sm text-gray-500">Created: {formatDate(route.createdAt)}</p>
-                    {route.completedAt && (
-                      <p className="text-sm text-gray-500">
-                        Completed: {formatDate(route.completedAt)}
-                      </p>
-                    )}
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                        {routeCount} Route{routeCount !== 1 ? 's' : ''}
-                      </span>
-                      {formattedDistance && (
-                        <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                          {formattedDistance} total
-                        </span>
-                      )}
-                      {skippedPairs > 0 && (
-                        <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full">
-                          {skippedPairs} Skipped
-                        </span>
-                      )}
-                      {customerCount > 0 && (
-                        <span className="text-xs bg-teal-100 text-teal-800 px-2 py-1 rounded-full">
-                          {customerCount} Customer{customerCount !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                      {executionTimeText && (
-                        <span className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full">
-                          ({executionTimeText})
-                        </span>
-                      )}
-                    </div>
-                    {route.inputMethod && (
-                      <span className="mt-1 block text-xs text-gray-500">
-                        Input: {route.inputMethod.charAt(0).toUpperCase() + route.inputMethod.slice(1)}
-                        {route.inputMethod === 'file' && route.fileUpload?.originalFilename && 
-                          ` (${route.fileUpload.originalFilename})`}
-                      </span>
-                    )}
+                    <button 
+                      className="text-blue-600 text-sm font-medium hover:underline"
+                      onClick={() => toggleExpandItem(route.jobId)}
+                    >
+                      {isExpanded ? 'Hide Details' : 'View Details'}
+                    </button>
                   </div>
-                  <button 
-                    className="text-blue-600 text-sm font-medium hover:underline"
-                    onClick={() => viewRouteDetails(route.jobId)}
-                  >
-                    View Details
-                  </button>
+                  
+                  {isExpanded && renderRouteDetails(route)}
                 </CardContent>
               </Card>
             );
@@ -371,66 +465,71 @@ const FlippableHistoryPage = () => {
             
             // Create friendly job identifier
             const friendlyJobName = generateFriendlyJobName(optimization.jobId, optimization.createdAt);
+            const isExpanded = expandedItems[optimization.jobId] || false;
             
             return (
               <Card key={optimization.jobId} className="hover:shadow-md transition-shadow duration-200">
-                <CardContent className="flex items-center justify-between p-4">
-                  <div>
-                    <div className="flex items-center">
-                      <p className="font-medium">{friendlyJobName}</p>
-                      <span className={`ml-2 text-xs px-2 py-1 rounded-full ${
-                        optimization.status === 'completed' 
-                          ? 'bg-green-100 text-green-800' 
-                          : optimization.status === 'failed'
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {optimization.status?.charAt(0).toUpperCase() + optimization.status?.slice(1) || 'Unknown'}
-                      </span>
-                    </div>
-                    
-                    <p className="text-sm text-gray-500">Created: {formatDate(optimization.createdAt)}</p>
-                    {optimization.completedAt && (
-                      <p className="text-sm text-gray-500">Completed: {formatDate(optimization.completedAt)}</p>
-                    )}
-                    
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {allocationCount > 0 && (
-                        <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">
-                          {allocationCount} Allocation{allocationCount !== 1 ? 's' : ''}
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center">
+                        <p className="font-medium">{friendlyJobName}</p>
+                        <span className={`ml-2 text-xs px-2 py-1 rounded-full ${
+                          optimization.status === 'completed' 
+                            ? 'bg-green-100 text-green-800' 
+                            : optimization.status === 'failed'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {optimization.status?.charAt(0).toUpperCase() + optimization.status?.slice(1) || 'Unknown'}
                         </span>
-                      )}
-                      {customerCount > 0 && (
-                        <span className="text-xs bg-teal-100 text-teal-800 px-2 py-1 rounded-full">
-                          {customerCount} Customer{customerCount !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                      {executionTimeText && (
-                        <span className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full">
-                          ({executionTimeText})
-                        </span>
-                      )}
-                    </div>
-                    
-                    {/* Show sample customer data if available */}
-                    {optimization.destination_customer && optimization.destination_customer.length > 0 && (
-                      <div className="mt-2 text-xs text-gray-600">
-                        <span className="font-medium">Customer sample: </span>
-                        {optimization.destination_customer.slice(0, 2).map((item, idx) => (
-                          <span key={idx}>
-                            {item.customer}{idx < Math.min(optimization.destination_customer.length, 2) - 1 ? ', ' : ''}
-                          </span>
-                        ))}
-                        {optimization.destination_customer.length > 2 && '...'}
                       </div>
-                    )}
+                      
+                      <p className="text-sm text-gray-500">Created: {formatDate(optimization.createdAt)}</p>
+                      {optimization.completedAt && (
+                        <p className="text-sm text-gray-500">Completed: {formatDate(optimization.completedAt)}</p>
+                      )}
+                      
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {allocationCount > 0 && (
+                          <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">
+                            {allocationCount} Allocation{allocationCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {customerCount > 0 && (
+                          <span className="text-xs bg-teal-100 text-teal-800 px-2 py-1 rounded-full">
+                            {customerCount} Customer{customerCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {executionTimeText && (
+                          <span className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full">
+                            ({executionTimeText})
+                          </span>
+                        )}
+                      </div>
+                      
+                      {/* Show sample customer data if available */}
+                      {optimization.destination_customer && optimization.destination_customer.length > 0 && (
+                        <div className="mt-2 text-xs text-gray-600">
+                          <span className="font-medium">Customer sample: </span>
+                          {optimization.destination_customer.slice(0, 2).map((item, idx) => (
+                            <span key={idx}>
+                              {item.customer}{idx < Math.min(optimization.destination_customer.length, 2) - 1 ? ', ' : ''}
+                            </span>
+                          ))}
+                          {optimization.destination_customer.length > 2 && '...'}
+                        </div>
+                      )}
+                    </div>
+                    <button 
+                      className="text-blue-600 text-sm font-medium hover:underline"
+                      onClick={() => toggleExpandItem(optimization.jobId)}
+                    >
+                      {isExpanded ? 'Hide Details' : 'View Details'}
+                    </button>
                   </div>
-                  <button 
-                    className="text-blue-600 text-sm font-medium hover:underline"
-                    onClick={() => viewOptimizationDetails(optimization.jobId)}
-                  >
-                    View Details
-                  </button>
+                  
+                  {isExpanded && renderOptimizationDetails(optimization)}
                 </CardContent>
               </Card>
             );
