@@ -1124,31 +1124,31 @@ const processRoutePair = (source, destination, isMultiDestination = false) => {
     fs.writeFileSync(dataPath, JSON.stringify(dataToWrite));
     
     const options = {
-    mode: 'text',
-    pythonPath: 'python', // Use system Python on Render
-    scriptPath: path.join(process.cwd(), 'python_scripts'),
-    args: ['optimize', dataPath]
-  };
+      mode: 'text',
+      pythonPath: 'python', // Use system Python on Render
+      scriptPath: path.join(process.cwd(), 'python_scripts'),
+      args: ['find_route', dataPath]
+    };
     
     let pyshell = new PythonShell('./app.py', options);
     let resultFound = false;
-    let stderrBuffer = ''; // Buffer to accumulate stderr output
+    let stdoutBuffer = ''; // Buffer to accumulate stdout output
     
-    pyshell.stderr.on('data', (data) => {
+    pyshell.stdout.on('data', (data) => {
       if (resultFound) return;
       const dataStr = data.toString();
-      console.log(`Python stderr: ${dataStr}`);
+      console.log(`Python stdout: ${dataStr}`);
       
-      // Accumulate stderr data
-      stderrBuffer += dataStr;
+      // Accumulate stdout data
+      stdoutBuffer += dataStr;
       
       // Specifically look for "Route Result:" marker followed by JSON
       if (dataStr.includes('Route Result:')) {
         // Try to extract the JSON after "Route Result:"
-        const routeResultIndex = stderrBuffer.lastIndexOf('Route Result:');
+        const routeResultIndex = stdoutBuffer.lastIndexOf('Route Result:');
         if (routeResultIndex !== -1) {
           const jsonStartIndex = routeResultIndex + 'Route Result:'.length;
-          const jsonString = stderrBuffer.substring(jsonStartIndex).trim();
+          const jsonString = stdoutBuffer.substring(jsonStartIndex).trim();
           
           // Try to parse the JSON
           try {
@@ -1171,6 +1171,11 @@ const processRoutePair = (source, destination, isMultiDestination = false) => {
       }
     });
     
+    // Still monitor stderr for errors, but don't try to parse results from it
+    pyshell.stderr.on('data', (data) => {
+      console.log(`Python stderr: ${data.toString()}`);
+    });
+    
     pyshell.end((err) => {
       // Clean up temp file if not already done
       try { fs.unlinkSync(dataPath); } catch (e) { /* ignore */ }
@@ -1187,7 +1192,7 @@ const processRoutePair = (source, destination, isMultiDestination = false) => {
       try {
         // Look for Route Result: followed by JSON
         const routeResultRegex = /Route Result:\s*(\{[\s\S]*\})/;
-        const resultMatch = stderrBuffer.match(routeResultRegex);
+        const resultMatch = stdoutBuffer.match(routeResultRegex);
         
         if (resultMatch && resultMatch[1]) {
           const jsonStr = resultMatch[1];
