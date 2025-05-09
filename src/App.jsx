@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, MapPin, Users, FileSpreadsheet, Route, Navigation, BarChart3 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import './App.css'; // Import the enhanced CSS
 
 import Header from './components/Header';
@@ -211,4 +210,4 @@ const App = () => {
   );
 };
 
-export default App;
+export default App

@@ -18,24 +18,30 @@ const RouteMap = ({ routes = [],driverLocations = [] }) => {
   const userMarkerRef = useRef(null); // Reference for user location marker
   
   // Check data availability on component mount
-  useEffect(() => {
-    const routesEmpty = !routes || routes.length === 0;
-    const driversEmpty = !driverLocations || driverLocations.length === 0;
-    
-    setDataStatus({
-      noRoutes: routesEmpty,
-      noDrivers: driversEmpty
-    });
-    
-    // If both are empty, try to get user location
-    if (routesEmpty && driversEmpty) {
-      getUserLocation();
-    }
-    
-    console.log("RouteMap component received routes:", routes);
-    console.log("RouteMap component received driver locations:", driverLocations);
-  }, [routes, driverLocations]);
+useEffect(() => {
+  const routesEmpty = !routes || routes.length === 0;
+  const driversEmpty = !driverLocations || driverLocations.length === 0;
   
+  // Only update state if the values have changed
+  setDataStatus(prevStatus => {
+    // Only update if values are different from previous state
+    if (prevStatus.noRoutes !== routesEmpty || prevStatus.noDrivers !== driversEmpty) {
+      return {
+        noRoutes: routesEmpty,
+        noDrivers: driversEmpty
+      };
+    }
+    return prevStatus; // Return previous state if nothing changed
+  });
+  
+  // If both are empty, try to get user location
+  if (routesEmpty && driversEmpty) {
+    getUserLocation();
+  }
+  
+  //console.log("RouteMap component received routes:", routes);
+  //console.log("RouteMap component received driver locations:", driverLocations);
+}, [routes, driverLocations]);
   // Get user's current location
   const getUserLocation = () => {
     // Only proceed if we don't already have user location

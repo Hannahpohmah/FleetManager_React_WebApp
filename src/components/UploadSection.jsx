@@ -410,7 +410,7 @@ const UploadSection = ({ setActiveTab, updateOptimizationResults }) => {
                     Processing...
                   </span>
                 ) : (
-                  "Logistics Optimizer"
+                  "Inventory Optimizer"
                 )}
               </button>
               <button
